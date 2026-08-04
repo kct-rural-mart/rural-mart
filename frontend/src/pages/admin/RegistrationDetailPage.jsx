@@ -1,27 +1,44 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabaseClient'
-import { generateTempPassword, generateUsername } from '../../utils/credentials'
 import CredentialsModal from '../../components/CredentialsModal'
 
-async function approveRegistration(registrationId, username, tempPassword) {
-  const { data, error } = await supabase.functions.invoke('approve-registration', {
-    body: { registrationId, username, tempPassword },
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
+
+async function getFreshAccessToken() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  // getSession() returns whatever is cached in local storage, which can be a
+  // token that expired while the tab was backgrounded/asleep and Supabase's
+  // background refresh timer didn't get to run. Force a refresh if it's
+  // missing or within 10s of expiry, rather than sending a token we already
+  // know the backend will reject with 401.
+  const expiresAtMs = (session?.expires_at ?? 0) * 1000
+  const isStale = !session || expiresAtMs < Date.now() + 10_000
+
+  if (!isStale) return session.access_token
+
+  const { data, error } = await supabase.auth.refreshSession()
+  if (error || !data.session) {
+    throw new Error('Your session has expired - please sign in again.')
+  }
+  return data.session.access_token
+}
+
+async function approveRegistration(registrationId) {
+  const accessToken = await getFreshAccessToken()
+
+  const response = await fetch(`${BACKEND_URL}/api/admin/registrations/${registrationId}/approve`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
   })
 
-  if (error) {
-    let message = error.message
-    if (error.context) {
-      try {
-        const body = await error.context.json()
-        if (body?.error) message = body.error
-      } catch {
-        // fall back to error.message below
-      }
-    }
-    throw new Error(message)
+  const data = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(data?.message ?? data?.error ?? data?.detail ?? `Approval failed (${response.status})`)
   }
-  if (data?.error) throw new Error(data.error)
 
   return data
 }
@@ -44,8 +61,6 @@ export default function RegistrationDetailPage() {
   const [error, setError] = useState('')
 
   const [showApproveModal, setShowApproveModal] = useState(false)
-  const [username, setUsername] = useState('')
-  const [tempPassword, setTempPassword] = useState('')
   const [approveSubmitting, setApproveSubmitting] = useState(false)
   const [approveError, setApproveError] = useState('')
   const [approvedCredentials, setApprovedCredentials] = useState(null)
@@ -83,27 +98,16 @@ export default function RegistrationDetailPage() {
     }
   }, [id])
 
-  const openApproveModal = async () => {
+  const openApproveModal = () => {
     setApproveError('')
-    const { count } = await supabase
-      .from('pending_registrations')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'approved')
-
-    setUsername(generateUsername((count ?? 0) + 1))
-    setTempPassword(generateTempPassword())
     setShowApproveModal(true)
   }
 
   const confirmApprove = async () => {
-    if (!username.trim() || !tempPassword.trim()) {
-      setApproveError('Username and temporary password are required.')
-      return
-    }
     setApproveSubmitting(true)
     setApproveError('')
     try {
-      const result = await approveRegistration(id, username.trim(), tempPassword.trim())
+      const result = await approveRegistration(id)
       console.log('Registration approved:', result.martId ?? id)
       setShowApproveModal(false)
       setRegistration((prev) => (prev ? { ...prev, status: 'approved' } : prev))
@@ -213,32 +217,16 @@ export default function RegistrationDetailPage() {
               Approve Registration
             </h2>
             <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 16 }}>
-              Review the generated login credentials below. You can edit them before confirming.
+              This creates a login for {registration.email} with a system-generated reference
+              code and temporary password. You&apos;ll see the credentials once approval
+              completes.
             </p>
             {approveError && <div className="alert alert-error">{approveError}</div>}
-            <div className="form-group">
-              <label htmlFor="genUsername">Reference Code</label>
-              <input
-                id="genUsername"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="genPassword">Temporary Password</label>
-              <input
-                id="genPassword"
-                type="text"
-                value={tempPassword}
-                onChange={(e) => setTempPassword(e.target.value)}
-              />
-            </div>
             <div className="credential-box">
-              The owner logs in with their registered email ({registration.email}) and this
-              temporary password — the reference code above is for display only. They will be
-              required to change their password on first login. Email delivery isn&apos;t
-              configured yet, so share this password with them manually for now.
+              The owner logs in with their registered email and the temporary password shown
+              next. They will be required to change their password on first login. Email
+              delivery isn&apos;t configured yet, so share this password with them manually for
+              now.
             </div>
             <div className="modal-actions">
               <button

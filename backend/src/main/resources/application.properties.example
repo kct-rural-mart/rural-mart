@@ -1,0 +1,35 @@
+# This file documents the environment variables application.properties reads -
+# it is NOT loaded by Spring Boot automatically (Spring has no built-in .env
+# support), unlike frontend/.env.example which Vite does load directly.
+#
+# Export these in your shell, set them in your IDE's Run Configuration, or put
+# them in a backend/.env file and source it yourself before running the app.
+# NEVER commit a file with real values filled in.
+
+# --- Database (Supabase Postgres) ---
+# Supabase dashboard: Project Settings -> Database -> Connection string.
+# Use the JDBC form below (jdbc:postgresql://...), not the raw postgres:// URI
+# Supabase shows by default - host/port/db name are the same, just reformatted,
+# and username/password go in separately rather than embedded in the URL.
+SUPABASE_DB_URL=jdbc:postgresql://db.your-project-ref.supabase.co:5432/postgres?sslmode=require
+SUPABASE_DB_USERNAME=postgres
+SUPABASE_DB_PASSWORD=your-database-password
+
+# --- JWT verification (Supabase dashboard: Project Settings -> API) ---
+# Set ONE of these two. Prefer the JWKS URL if your project has asymmetric
+# ("JWT Signing Keys") enabled; otherwise use the legacy shared JWT secret.
+SUPABASE_JWT_JWKS_URI=https://your-project-ref.supabase.co/auth/v1/.well-known/jwks.json
+SUPABASE_JWT_SECRET=your-supabase-jwt-secret
+
+# --- Supabase Admin API (Project Settings -> API) ---
+# Used by RegistrationApprovalService to create/delete Supabase Auth users
+# when approving a pending registration. SUPABASE_URL is the project's base
+# URL (e.g. https://your-project-ref.supabase.co); SUPABASE_SERVICE_ROLE_KEY
+# is sent as the Bearer token. Keep the key secret; it bypasses Row Level
+# Security entirely.
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+
+# --- Optional overrides ---
+SERVER_PORT=8080
+APP_CORS_ALLOWED_ORIGINS=http://localhost:5173
