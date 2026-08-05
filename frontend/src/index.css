@@ -786,3 +786,189 @@ tbody tr:hover {
   padding: 14px;
   margin-top: 12px;
 }
+
+/* ==========================================================================
+   PRODUCT INVENTORY & ANALYTICS STYLES
+   ========================================================================== */
+
+.pip-page {
+  --pip-primary: #2D5A27;
+  --pip-primary-dark: #21421c;
+  --pip-surface-green: #DCE8C5;
+  --pip-bg: #F7F7F5;
+  --pip-surface: #FFFFFF;
+  --pip-text: #1F2A1F;
+  --pip-text-muted: #667064;
+  --pip-border: #E2E7DF;
+  --pip-danger: #B42318;
+  --pip-radius: 16px;
+  --pip-radius-sm: 10px;
+  --pip-shadow: 0 1px 2px rgba(31, 42, 31, 0.04), 0 4px 10px rgba(31, 42, 31, 0.04);
+  --pip-shadow-lg: 0 20px 45px rgba(31, 42, 31, 0.16);
+
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 100%;
+  padding-bottom: 32px;
+  color: var(--pip-text);
+}
+
+.pip-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.pip-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 4px 0;
+}
+
+.pip-subtitle {
+  font-size: 13px;
+  color: var(--pip-text-muted);
+  margin: 0;
+}
+
+/* KPI Cards */
+.pip-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.pip-kpi-card {
+  background: var(--pip-surface);
+  border: 1px solid var(--pip-border);
+  border-radius: var(--pip-radius);
+  padding: 20px;
+  box-shadow: var(--pip-shadow);
+}
+
+.pip-kpi-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.pip-kpi-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--pip-text-muted);
+}
+
+.pip-kpi-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.pip-kpi-subval {
+  font-size: 14px;
+  color: var(--pip-text-muted);
+}
+
+/* Overview Card & Layout */
+.pip-overview-card {
+  background: var(--pip-surface);
+  border: 1px solid var(--pip-border);
+  border-radius: var(--pip-radius);
+  padding: 28px;
+  box-shadow: var(--pip-shadow);
+}
+
+.pip-overview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 32px;
+  align-items: center;
+}
+
+.pip-action-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.pip-card-title {
+  font-size: 18px;
+  font-weight: 800;
+  margin: 0 0 6px 0;
+}
+
+.pip-card-desc {
+  font-size: 13px;
+  color: var(--pip-text-muted);
+  margin: 0;
+}
+
+.pip-action-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.pip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 20px;
+  border-radius: var(--pip-radius-sm);
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.pip-btn-primary {
+  background: var(--pip-primary);
+  color: #fff;
+}
+
+.pip-btn-primary:hover {
+  background: var(--pip-primary-dark);
+}
+
+.pip-btn-outlined {
+  background: transparent;
+  border-color: var(--pip-border);
+  color: var(--pip-text);
+}
+
+.pip-btn-outlined:hover {
+  border-color: var(--pip-primary);
+}
+
+/* Modal Overlay */
+.pip-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(31, 42, 31, 0.45);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.pip-modal-panel {
+  background: var(--pip-surface);
+  border-radius: var(--pip-radius);
+  width: 100%;
+  max-width: 580px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 24px;
+  box-shadow: var(--pip-shadow-lg);
+}
+
+/* Responsiveness */
+@media (max-width: 1024px) {
+  .pip-kpi-grid,
+  .pip-overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
