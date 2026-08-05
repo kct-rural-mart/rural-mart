@@ -7,6 +7,11 @@ import LoginPage from './pages/LoginPage'
 import RegisterMartPage from './pages/RegisterMartPage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import OwnerDashboard from './pages/OwnerDashboard'
+import DailyBusinessPage from './pages/owner/DailyBusinessPage'
+import ProductInventoryPage from './pages/owner/ProductInventoryPage'
+import FarmerOutreachPage from './pages/owner/FarmerOutreachPage'
+import FinancialDashboardPage from './pages/owner/FinancialDashboardPage'
+import OwnerSettingsPage from './pages/owner/OwnerSettingsPage'
 import AdminDashboard from './pages/AdminDashboard'
 import PendingRegistrationsPage from './pages/admin/PendingRegistrationsPage'
 import RegistrationDetailPage from './pages/admin/RegistrationDetailPage'
@@ -37,6 +42,11 @@ function App() {
             }
           >
             <Route path="dashboard" element={<OwnerDashboard />} />
+            <Route path="daily-business" element={<DailyBusinessPage />} />
+            <Route path="product-inventory" element={<ProductInventoryPage />} />
+            <Route path="farmer-outreach" element={<FarmerOutreachPage />} />
+            <Route path="financial" element={<FinancialDashboardPage />} />
+            <Route path="settings" element={<OwnerSettingsPage />} />
           </Route>
 
           <Route

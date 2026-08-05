@@ -28,15 +28,11 @@ import {
 
 const NAV_ITEMS = {
   owner: [
-    { to: '/owner/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/owner/farmers', label: 'Farmers', icon: Users },
-    { to: '/owner/products', label: 'Products', icon: Package },
-    { to: '/owner/sales', label: 'Sales', icon: TrendingUp },
-    { to: '/owner/procurement', label: 'Procurement', icon: Briefcase },
-    { to: '/owner/inventory', label: 'Inventory', icon: Package },
-    { to: '/owner/outreach', label: 'Outreach Programs', icon: Users },
-    { to: '/owner/reports', label: 'Reports', icon: FileText },
-    { to: '/owner/finance', label: 'Finance', icon: DollarSign },
+    { to: '/owner/dashboard', label: 'Overall Dashboard', icon: LayoutDashboard },
+    { to: '/owner/daily-business', label: 'Daily Business', icon: Briefcase },
+    { to: '/owner/product-inventory', label: 'Product & Inventory', icon: Package },
+    { to: '/owner/farmer-outreach', label: 'Farmer Outreach', icon: Users },
+    { to: '/owner/financial', label: 'Financial Dashboard', icon: DollarSign },
     { to: '/owner/settings', label: 'Settings', icon: Settings },
   ],
   admin: [
