@@ -194,7 +194,7 @@ export default function ProductInventoryPage() {
         <div className="pip-kpi-card kpi-bg-1">
           <div className="pip-kpi-header">
             <span className="pip-kpi-label">TOP SELLING PRODUCT</span>
-            <span className="pip-kpi-icon">🌾</span>
+            <span className="pip-kpi-icon"></span>
           </div>
           <h3 className="pip-kpi-val-title">Mineral Mixture</h3>
           <div className="pip-kpi-num">₹45,680</div>
@@ -204,7 +204,7 @@ export default function ProductInventoryPage() {
         <div className="pip-kpi-card kpi-bg-2">
           <div className="pip-kpi-header">
             <span className="pip-kpi-label">CATEGORY SALES TOTAL</span>
-            <span className="pip-kpi-icon">📈</span>
+            <span className="pip-kpi-icon"></span>
           </div>
           <div className="pip-kpi-num" style={{ marginTop: 8 }}>₹2,45,780</div>
           <span className="pip-trend-badge positive">+12.4% overall growth</span>
@@ -214,7 +214,7 @@ export default function ProductInventoryPage() {
         <div className="pip-kpi-card kpi-bg-3">
           <div className="pip-kpi-header">
             <span className="pip-kpi-label">SUPPLIER WISE SALES</span>
-            <span className="pip-kpi-icon">🚚</span>
+            <span className="pip-kpi-icon"></span>
           </div>
           <div className="pip-kpi-num" style={{ marginTop: 8 }}>₹1,78,450</div>
           <span className="pip-trend-badge positive">+9.7% efficiency</span>
@@ -229,7 +229,7 @@ export default function ProductInventoryPage() {
           
           {/* Category Share Panel (Side-by-Side SVG Chart + Legend Dropdown) */}
           <div className="pip-panel-card">
-            <h2 className="pip-panel-title">📊 Category Share</h2>
+            <h2 className="pip-panel-title">Category Share</h2>
             
             <div className="pip-category-body">
               {/* SVG Interactive Donut Chart */}
@@ -301,7 +301,7 @@ export default function ProductInventoryPage() {
 
           {/* Low Stock Alerts */}
           <div className="pip-panel-card">
-            <h2 className="pip-panel-title">⚠️ Stock Alerts & Fast Movers</h2>
+            <h2 className="pip-panel-title"> Stock Alerts & Fast Movers</h2>
             <div className="pip-alert-row">
               <div>
                 <div className="pip-alert-name">Farm Sprayer Pump</div>
@@ -322,7 +322,7 @@ export default function ProductInventoryPage() {
         {/* Right Column: Catalog Table */}
         <div className="pip-panel-card pip-right-panel">
           <div className="pip-table-header">
-            <h2 className="pip-panel-title">📦 Active Inventory & Sales Catalog</h2>
+            <h2 className="pip-panel-title"> Active Inventory & Sales Catalog</h2>
             <input
               type="text"
               className="pip-search-input"
@@ -377,7 +377,7 @@ export default function ProductInventoryPage() {
           <div className="pip-modal" onClick={(e) => e.stopPropagation()}>
             <div className="pip-modal-header">
               <div className="pip-modal-title-group">
-                <div className="pip-modal-icon-badge">📦</div>
+                <div className="pip-modal-icon-badge"></div>
                 <div>
                   <h3>Edit Stock & Pricing</h3>
                   <p className="pip-modal-sub">
@@ -393,7 +393,7 @@ export default function ProductInventoryPage() {
                 <div className="pip-inventory-box-header">
                   <label>Current Inventory Stock (Units) *</label>
                   <span className={`pip-status-chip ${Number(stockQty) < 50 ? 'low' : 'healthy'}`}>
-                    {Number(stockQty) < 50 ? '⚠️ Low Stock Alert' : '✔ Healthy Stock Level'}
+                    {Number(stockQty) < 50 ? ' Low Stock Alert' : '✔ Healthy Stock Level'}
                   </span>
                 </div>
 

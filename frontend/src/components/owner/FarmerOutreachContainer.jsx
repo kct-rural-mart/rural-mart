@@ -1,22 +1,21 @@
-// src/pages/owner/FarmerOutreachPage.jsx
 import React, { useState } from 'react';
-import OutreachHeader from '../../components/owner/OutreachHeader';
-import OutreachKPICards from '../../components/owner/OutreachKPICards';
-import OutreachForm from '../../components/owner/OutreachForm';
-import OutreachLogbookDrawer from '../../components/owner/OutreachLogbookDrawer';
+import OutreachHeader from './OutreachHeader';
+import OutreachKPICards from './OutreachKPICards';
+import OutreachForm from './OutreachForm';
+import OutreachLogbookDrawer from './OutreachLogbookDrawer';
 
-export default function FarmerOutreachPage() {
+export default function FarmerOutreachContainer() {
   const [isLogbookOpen, setIsLogbookOpen] = useState(false);
 
-  // Sample KPI metrics state
-  const [metrics] = useState({
+  // Sample data for KPI metrics
+  const metrics = {
     programs: '27 Sessions',
     reached: '1,245 Farmers',
     conversion: '34.8%',
     sales: '₹1.28 Lakhs'
-  });
+  };
 
-  // Historical logbook entries state
+  // Sample data for historical logs
   const [logbookEntries, setLogbookEntries] = useState([
     {
       id: 1,
@@ -53,24 +52,6 @@ export default function FarmerOutreachPage() {
     }
   ]);
 
-  // Handler to add a new form entry directly to the logbook state
-  const handleSaveSession = (newSession) => {
-    const entry = {
-      id: Date.now(),
-      title: `${newSession.activityType} - ${newSession.village}`,
-      date: newSession.sessionDate,
-      description: newSession.description,
-      tags: newSession.topics,
-      attended: Number(newSession.attended) || 0,
-      existing: Math.max(0, (Number(newSession.attended) || 0) - Math.floor((Number(newSession.attended) || 0) * 0.35)),
-      newLeads: Math.floor((Number(newSession.attended) || 0) * 0.35),
-      status: 'Completed'
-    };
-
-    setLogbookEntries([entry, ...logbookEntries]);
-    setIsLogbookOpen(true); // Automatically open the drawer to show the newly added log
-  };
-
   return (
     <div style={{ padding: '24px', backgroundColor: '#f8f9fa', minHeight: '100vh' }}>
       <OutreachHeader 
@@ -81,7 +62,7 @@ export default function FarmerOutreachPage() {
 
       <OutreachKPICards metrics={metrics} />
 
-      <OutreachForm onSave={handleSaveSession} />
+      <OutreachForm />
 
       <OutreachLogbookDrawer 
         isOpen={isLogbookOpen}
