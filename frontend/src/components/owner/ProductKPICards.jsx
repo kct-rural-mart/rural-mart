@@ -7,7 +7,7 @@ export default function ProductKPICards({ metrics }) {
   return (
     <div className="pip-kpi-grid">
       {/* KPI 1: Top Selling Product */}
-      <div className="pip-kpi-card">
+      <div className="pip-kpi-card" style={styles.card}>
         <div className="pip-kpi-top">
           <span className="pip-kpi-label">Top Selling Product</span>
           <div className="pip-kpi-icon">
@@ -20,13 +20,10 @@ export default function ProductKPICards({ metrics }) {
         </div>
         <div className="pip-kpi-title">{metrics.topSellingProduct.name}</div>
         <div className="pip-kpi-subval">{metrics.topSellingProduct.units} Units Sold</div>
-        <div className="pip-kpi-trend positive">
-          <span>↑ {metrics.topSellingProduct.trend}%</span>
-        </div>
       </div>
 
       {/* KPI 2: Category-wise Sales */}
-      <div className="pip-kpi-card">
+      <div className="pip-kpi-card" style={styles.card}>
         <div className="pip-kpi-top">
           <span className="pip-kpi-label">Category-wise Sales</span>
           <div className="pip-kpi-icon">
@@ -38,13 +35,10 @@ export default function ProductKPICards({ metrics }) {
         </div>
         <div className="pip-kpi-title">{metrics.topCategory.name}</div>
         <div className="pip-kpi-subval">{formatCurrency(metrics.topCategory.revenue)}</div>
-        <div className="pip-kpi-trend positive">
-          <span>↑ {metrics.topCategory.trend}%</span>
-        </div>
       </div>
 
       {/* KPI 3: Supplier-wise Sales */}
-      <div className="pip-kpi-card">
+      <div className="pip-kpi-card" style={styles.card}>
         <div className="pip-kpi-top">
           <span className="pip-kpi-label">Supplier-wise Sales</span>
           <div className="pip-kpi-icon">
@@ -58,10 +52,14 @@ export default function ProductKPICards({ metrics }) {
         </div>
         <div className="pip-kpi-title">{metrics.topSupplier.name}</div>
         <div className="pip-kpi-subval">{formatCurrency(metrics.topSupplier.revenue)}</div>
-        <div className="pip-kpi-trend positive">
-          <span>↑ {metrics.topSupplier.trend}%</span>
-        </div>
       </div>
     </div>
   );
 }
+
+const styles = {
+  card: {
+    backgroundColor: '#ffffff',
+    backgroundImage: 'none',
+  },
+};
