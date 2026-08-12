@@ -6,7 +6,7 @@ async function copyText(text) {
   return true
 }
 
-export default function CredentialsModal({ email, username, tempPassword, onClose }) {
+export default function CredentialsModal({ email, username, tempPassword, emailSent, onClose }) {
   const [copiedField, setCopiedField] = useState('')
 
   const fullBlock = `Owner Email: ${email}\nReference ID: ${username}\nTemporary Password: ${tempPassword}`
@@ -25,7 +25,9 @@ export default function CredentialsModal({ email, username, tempPassword, onClos
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
         <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Registration Approved</h2>
         <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 16 }}>
-          The owner account has been created with the credentials below.
+          {emailSent
+            ? 'The owner account has been created and these credentials have been emailed to them automatically.'
+            : 'The owner account has been created with the credentials below.'}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -55,8 +57,9 @@ export default function CredentialsModal({ email, username, tempPassword, onClos
         </div>
 
         <div className="credential-box">
-          Share these credentials with the owner. This is the only time the password will be
-          shown.
+          {emailSent
+            ? "Shown here as a backup — the owner has already been emailed their login details. This is the only time the password will be shown."
+            : 'Automatic email delivery failed, so share these credentials with the owner manually. This is the only time the password will be shown.'}
         </div>
 
         <div className="modal-actions">

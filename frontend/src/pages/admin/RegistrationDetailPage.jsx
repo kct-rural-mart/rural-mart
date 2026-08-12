@@ -3,8 +3,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabaseClient'
 import CredentialsModal from '../../components/CredentialsModal'
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
-
 async function getFreshAccessToken() {
   const {
     data: { session },
@@ -27,17 +25,28 @@ async function getFreshAccessToken() {
   return data.session.access_token
 }
 
+// FunctionsHttpError (a 4xx/5xx JSON response from the function) carries the
+// body on error.context as a Response; other error types (network, CORS) don't,
+// so fall back to error.message in that case.
+async function extractFunctionErrorMessage(error) {
+  const response = error?.context
+  if (response && typeof response.json === 'function') {
+    const body = await response.json().catch(() => null)
+    if (body?.error) return body.error
+  }
+  return error?.message ?? 'Approval failed'
+}
+
 async function approveRegistration(registrationId) {
   const accessToken = await getFreshAccessToken()
 
-  const response = await fetch(`${BACKEND_URL}/api/admin/registrations/${registrationId}/approve`, {
-    method: 'POST',
+  const { data, error } = await supabase.functions.invoke('approve-registration', {
+    body: { registrationId },
     headers: { Authorization: `Bearer ${accessToken}` },
   })
 
-  const data = await response.json().catch(() => null)
-  if (!response.ok) {
-    throw new Error(data?.message ?? data?.error ?? data?.detail ?? `Approval failed (${response.status})`)
+  if (error) {
+    throw new Error(await extractFunctionErrorMessage(error))
   }
 
   return data
@@ -115,6 +124,7 @@ export default function RegistrationDetailPage() {
         email: result.email,
         username: result.username,
         tempPassword: result.tempPassword,
+        emailSent: result.emailSent,
       })
     } catch (err) {
       setApproveError(err.message)
@@ -224,9 +234,9 @@ export default function RegistrationDetailPage() {
             {approveError && <div className="alert alert-error">{approveError}</div>}
             <div className="credential-box">
               The owner logs in with their registered email and the temporary password shown
-              next. They will be required to change their password on first login. Email
-              delivery isn&apos;t configured yet, so share this password with them manually for
-              now.
+              next. They will be required to change their password on first login. Their
+              credentials will be emailed to them automatically; you&apos;ll also see them here
+              in case you need to share them manually.
             </div>
             <div className="modal-actions">
               <button
@@ -298,6 +308,7 @@ export default function RegistrationDetailPage() {
           email={approvedCredentials.email}
           username={approvedCredentials.username}
           tempPassword={approvedCredentials.tempPassword}
+          emailSent={approvedCredentials.emailSent}
           onClose={closeCredentialsModal}
         />
       )}

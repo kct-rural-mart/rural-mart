@@ -1,0 +1,17 @@
+export const INITIAL_CANONICAL_MARTS = []
+
+export const INITIAL_CANONICAL_OWNERS = []
+
+export const INITIAL_CANONICAL_FARMERS = []
+
+export const INITIAL_CANONICAL_PRODUCTS = []
+
+export const INITIAL_CANONICAL_SALES = []
+
+export const INITIAL_CANONICAL_EXPENSES = []
+
+export const INITIAL_CANONICAL_OUTREACH = []
+
+export const INITIAL_CANONICAL_FINANCIALS = []
+
+export const INITIAL_CANONICAL_APPLICATIONS = []
