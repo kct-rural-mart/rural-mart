@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { FINANCIAL_TREND_DATA } from '../../../lib/newPages/mockData'
 import { CHART_COLORS } from '../../../lib/newPages/chartColors'
 
 function CustomTooltip({ active, payload, label }) {
@@ -26,7 +25,7 @@ function CustomTooltip({ active, payload, label }) {
   return null
 }
 
-export default function FinancialTrendChart() {
+export default function FinancialTrendChart({ trendData = [] }) {
   const [selectedMetric, setSelectedMetric] = useState('All')
 
   return (
@@ -50,13 +49,13 @@ export default function FinancialTrendChart() {
       </div>
 
       <div className="w-full h-72 md:h-80 relative">
-        {FINANCIAL_TREND_DATA.length === 0 ? (
+        {trendData.length === 0 ? (
           <div className="h-full w-full flex items-center justify-center text-xs text-brand-text-muted italic bg-brand-bg-subtle rounded-xl border border-brand-border/50">
             No financial trend data available
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={FINANCIAL_TREND_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <LineChart data={trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} vertical={false} />
               <XAxis dataKey="period" tick={{ fill: CHART_COLORS.textMuted, fontSize: 11, fontWeight: 500 }} axisLine={{ stroke: CHART_COLORS.border }} tickLine={false} />
               <YAxis tick={{ fill: CHART_COLORS.textMuted, fontSize: 11, fontWeight: 500 }} axisLine={false} tickLine={false} tickFormatter={(v) => `₹${v}L`} />

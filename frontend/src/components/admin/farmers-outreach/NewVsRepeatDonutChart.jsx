@@ -1,5 +1,4 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts'
-import { NEW_VS_REPEAT_DONUT } from '../../../lib/newPages/mockData'
 import { CHART_COLORS } from '../../../lib/newPages/chartColors'
 
 function CustomTooltip({ active, payload }) {
@@ -38,8 +37,8 @@ function renderCustomizedLabel({ cx, cy, midAngle, innerRadius, outerRadius, per
   )
 }
 
-export default function NewVsRepeatDonutChart() {
-  const donutData = NEW_VS_REPEAT_DONUT.map((item) => {
+export default function NewVsRepeatDonutChart({ donutData: rawDonutData = [] }) {
+  const donutData = rawDonutData.map((item) => {
     if (item.name.toLowerCase().includes('repeat')) {
       return { ...item, color: CHART_COLORS.primary }
     }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Store, CheckCircle2, AlertTriangle, Award, Zap, TrendingUp, Info } from 'lucide-react'
+import { Store, CheckCircle2, AlertTriangle, Award, Zap, Percent, Info } from 'lucide-react'
 
 export default function RuralMartsKpiCards({ marts }) {
   const [activeTooltip, setActiveTooltip] = useState(null)
@@ -8,21 +8,22 @@ export default function RuralMartsKpiCards({ marts }) {
   const activeMarts = marts.filter((m) => m.status === 'Active').length
   const inactiveMarts = totalMarts - activeMarts
 
-  const sortedByScore = [...marts].filter((m) => m.score > 0).sort((a, b) => b.score - a.score)
-  const bestMart = sortedByScore[0]
+  const sortedByNetProfit = [...marts].filter((m) => m.netProfitRaw > 0).sort((a, b) => b.netProfitRaw - a.netProfitRaw)
+  const topMart = sortedByNetProfit[0]
 
-  const sortedByGrowth = [...marts].filter((m) => m.salesGrowthPercent > 0).sort((a, b) => (b.salesGrowthPercent || 0) - (a.salesGrowthPercent || 0))
+  const sortedByGrowth = [...marts].filter((m) => m.salesGrowthPercent > 0).sort((a, b) => b.salesGrowthPercent - a.salesGrowthPercent)
   const fastestMart = sortedByGrowth[0]
 
-  const avgScore = marts.length > 0 ? (marts.reduce((acc, m) => acc + (m.score || 0), 0) / marts.length).toFixed(1) : '0.0'
+  const martsWithSales = marts.filter((m) => m.salesRaw > 0)
+  const avgProfitMargin = martsWithSales.length > 0 ? (martsWithSales.reduce((acc, m) => acc + m.profitMargin, 0) / martsWithSales.length).toFixed(1) : '0.0'
 
   const kpis = [
-    { id: 'kpi-total', label: 'Total Rural Marts', value: totalMarts.toString(), icon: Store, tooltip: 'Total registered and sanctioned Rural Mart outposts across monitored districts.' },
-    { id: 'kpi-active', label: 'Active Rural Marts', value: activeMarts.toString(), icon: CheckCircle2, tooltip: 'Rural Marts actively generating daily sales, serving farmers, and syncing data.' },
-    { id: 'kpi-inactive', label: 'Inactive / Delayed', value: inactiveMarts.toString(), icon: AlertTriangle, tooltip: 'Rural Marts marked inactive, experiencing data lag, or pending restocking.' },
-    { id: 'kpi-best', label: 'Best Performing Mart', value: bestMart ? bestMart.name : 'N/A', icon: Award, tooltip: 'Top-ranked Rural Mart evaluated on sales growth, profitability, farmer reach, and inventory health.' },
-    { id: 'kpi-fastest', label: 'Fastest Growing Mart', value: fastestMart ? fastestMart.name : 'N/A', icon: Zap, tooltip: 'Rural Mart experiencing the highest year-over-year revenue and registered farmer growth.' },
-    { id: 'kpi-avg-score', label: 'Avg Performance Score', value: `${avgScore}`, icon: TrendingUp, tooltip: 'Weighted average composite performance score across all Rural Marts in the network.' },
+    { id: 'kpi-total', label: 'Total Rural Marts', value: totalMarts.toString(), icon: Store, tooltip: 'Total registered Rural Mart outposts across monitored districts.' },
+    { id: 'kpi-active', label: 'Active Rural Marts', value: activeMarts.toString(), icon: CheckCircle2, tooltip: 'Rural Marts with at least one recorded sale in the selected period.' },
+    { id: 'kpi-inactive', label: 'Inactive / Delayed', value: inactiveMarts.toString(), icon: AlertTriangle, tooltip: 'Rural Marts with no sales in the selected period - restocking only (Delayed) or no activity at all (Inactive).' },
+    { id: 'kpi-top', label: 'Top Mart by Net Profit', value: topMart ? topMart.name : 'N/A', icon: Award, tooltip: 'Rural Mart with the highest Net Profit (Revenue - Procurement - Operating Expenses) in the selected period.' },
+    { id: 'kpi-fastest', label: 'Fastest Growing Mart', value: fastestMart ? fastestMart.name : 'N/A', icon: Zap, tooltip: 'Rural Mart with the highest sales growth vs. the equivalent prior period.' },
+    { id: 'kpi-avg-margin', label: 'Avg Profit Margin', value: `${avgProfitMargin}%`, icon: Percent, tooltip: 'Average Net Profit Margin across Rural Marts with recorded sales in the selected period.' },
   ]
 
   return (

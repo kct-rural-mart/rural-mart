@@ -1,305 +1,483 @@
-import { useMemo, useState } from 'react'
-import { TrendingUp, DollarSign, Package, Users, ChevronDown, Info, ArrowUpRight } from 'lucide-react'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
-import { getChartTheme } from '../../lib/newPages/chartColors'
-import { getStoredSession } from '../../lib/newPages/storageService'
-import {
-  getSalesByRuralMart,
-  getExpensesByRuralMart,
-  getProductsByRuralMart,
-  getOutreachByRuralMart,
-  getPurchasesByRuralMart,
-} from '../../lib/newPages/shared/dataServices'
+import { useEffect, useRef, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import { TrendingUp, DollarSign, Package, Users, Receipt, X, CheckCircle2, AlertCircle, Loader2, Truck, SquareArrowOutUpRight } from 'lucide-react'
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts'
+import { CHART_COLORS } from '../../lib/newPages/chartColors'
+import { getOwnerOverviewData } from '../../lib/queries/ownerOverview'
+import { getOwnerProducts, addProduct, recordProcurement, PRODUCT_CATEGORIES } from '../../lib/queries/ownerProducts'
+import { formatLakhsCr } from '../../lib/queries/finance'
+import { getLocalToday } from '../../utils/date'
+import BillingPanel from './BillingPanel'
 
-function CustomTooltip({ active, payload, label }) {
-  if (active && payload && payload.length) {
-    const salesVal = payload[0]?.value ?? 0
-    const procVal = payload[1]?.value ?? 0
+export default function OwnerOverallDashboard() {
+  const { ruralMartId, dateRange, refreshKey: layoutRefreshKey } = useOutletContext()
 
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const bump = () => setRefreshKey((k) => k + 1)
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function load() {
+      setLoading(true)
+      setError('')
+      try {
+        const result = await getOwnerOverviewData({ ruralMartId, dateRange })
+        if (isMounted) setData(result)
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load dashboard data.')
+      } finally {
+        if (isMounted) setLoading(false)
+      }
+    }
+
+    if (ruralMartId) load()
+    return () => {
+      isMounted = false
+    }
+  }, [ruralMartId, dateRange, layoutRefreshKey, refreshKey])
+
+  const [toastMsg, setToastMsg] = useState(null)
+  const showToast = (msg) => {
+    setToastMsg(msg)
+    setTimeout(() => setToastMsg(null), 4000)
+  }
+
+  const [isDailySalesModalOpen, setIsDailySalesModalOpen] = useState(false)
+  const billingPanelRef = useRef(null)
+
+  const [isProcurementModalOpen, setIsProcurementModalOpen] = useState(false)
+  const [products, setProducts] = useState([])
+  const [procureMode, setProcureMode] = useState('EXISTING')
+  const [selectedProcureProductId, setSelectedProcureProductId] = useState('')
+  const [procName, setProcName] = useState('')
+  const [procCategory, setProcCategory] = useState(PRODUCT_CATEGORIES[0])
+  const [procUnit, setProcUnit] = useState('')
+  const [procQty, setProcQty] = useState('')
+  const [procCost, setProcCost] = useState('')
+  const [procSupplier, setProcSupplier] = useState('')
+  const [procDate, setProcDate] = useState(getLocalToday())
+  const [procError, setProcError] = useState('')
+  const [procSubmitting, setProcSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!isProcurementModalOpen || !ruralMartId) return
+    getOwnerProducts(ruralMartId)
+      .then(setProducts)
+      .catch((err) => console.error('Failed to load products for procurement:', err.message))
+  }, [isProcurementModalOpen, ruralMartId, refreshKey])
+
+  const handleSelectProcureProduct = (id) => {
+    setSelectedProcureProductId(id)
+    if (id === 'NEW') {
+      setProcureMode('NEW')
+      setProcName('')
+      setProcCategory(PRODUCT_CATEGORIES[0])
+      setProcUnit('')
+    } else {
+      setProcureMode('EXISTING')
+    }
+  }
+
+  const resetProcureForm = () => {
+    setProcureMode('EXISTING')
+    setSelectedProcureProductId('')
+    setProcName('')
+    setProcCategory(PRODUCT_CATEGORIES[0])
+    setProcUnit('')
+    setProcQty('')
+    setProcCost('')
+    setProcSupplier('')
+    setProcDate(getLocalToday())
+    setProcError('')
+  }
+
+  const handleSaveProcurement = async (e) => {
+    e.preventDefault()
+    setProcError('')
+
+    const numQty = Number(procQty)
+    if (!numQty || numQty <= 0) {
+      setProcError('Please enter a valid procurement quantity (> 0).')
+      return
+    }
+    const numCost = Number(procCost)
+    if (isNaN(numCost) || numCost <= 0) {
+      setProcError('Please enter a valid total procurement cost.')
+      return
+    }
+
+    setProcSubmitting(true)
+    try {
+      let productId = selectedProcureProductId
+
+      if (procureMode === 'NEW') {
+        if (!procName.trim() || !procUnit.trim()) {
+          setProcError('Product name and unit are required for a new product.')
+          setProcSubmitting(false)
+          return
+        }
+        const newProduct = await addProduct({
+          ruralMartId,
+          category: procCategory,
+          name: procName.trim(),
+          unit: procUnit.trim(),
+          purchasePrice: numCost / numQty,
+          sellingPrice: numCost / numQty,
+        })
+        productId = newProduct.id
+      }
+
+      if (!productId) {
+        setProcError('Please select a product, or choose "+ Create New Product".')
+        setProcSubmitting(false)
+        return
+      }
+
+      await recordProcurement({
+        ruralMartId,
+        productId,
+        quantity: numQty,
+        cost: numCost,
+        supplierName: procSupplier.trim(),
+        procurementDate: procDate,
+      })
+
+      setIsProcurementModalOpen(false)
+      resetProcureForm()
+      bump()
+      showToast(`Successfully procured ${numQty} ${procUnit || 'units'}!`)
+    } catch (err) {
+      setProcError(err.message || 'Failed to record procurement.')
+    } finally {
+      setProcSubmitting(false)
+    }
+  }
+
+  if (loading && !data) {
     return (
-      <div className="bg-brand-surface border border-brand-border rounded-xl p-3 shadow-lg text-xs space-y-1.5 min-w-[170px]">
-        <div className="font-bold text-brand-text border-b border-brand-border/60 pb-1">{label}</div>
-        <div className="space-y-1">
-          <div className="flex justify-between items-center text-brand-primary font-semibold">
-            <span>Sales:</span>
-            <span>₹{salesVal.toLocaleString('en-IN')}</span>
-          </div>
-          <div className="flex justify-between items-center text-brand-warning font-semibold">
-            <span>Proc:</span>
-            <span>₹{procVal.toLocaleString('en-IN')}</span>
-          </div>
-        </div>
+      <div className="flex items-center justify-center h-64 text-brand-text-muted gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        <span className="text-sm font-medium">Loading dashboard…</span>
       </div>
     )
   }
-  return null
-}
 
-export default function OwnerOverallDashboard() {
-  const chartTheme = getChartTheme()
-
-  const [chartMode, setChartMode] = useState('Current Period')
-  const [hoveredDate, setHoveredDate] = useState(null)
-
-  const session = getStoredSession()
-  const ruralMartId = session?.ruralMartId || session?.email || ''
-
-  const salesRecords = useMemo(() => (ruralMartId ? getSalesByRuralMart(ruralMartId) : []), [ruralMartId])
-  const expenseRecords = useMemo(() => (ruralMartId ? getExpensesByRuralMart(ruralMartId) : []), [ruralMartId])
-  const purchaseRecords = useMemo(() => (ruralMartId ? getPurchasesByRuralMart(ruralMartId) : []), [ruralMartId])
-  const productRecords = useMemo(() => (ruralMartId ? getProductsByRuralMart(ruralMartId) : []), [ruralMartId])
-  const outreachRecords = useMemo(() => (ruralMartId ? getOutreachByRuralMart(ruralMartId) : []), [ruralMartId])
-
-  const totalSalesVal = useMemo(() => salesRecords.reduce((acc, curr) => acc + (curr.amount || 0), 0), [salesRecords])
-  const totalProcurementVal = useMemo(() => purchaseRecords.reduce((acc, curr) => acc + (curr.amount || 0), 0), [purchaseRecords])
-  const totalExpensesVal = useMemo(() => expenseRecords.reduce((acc, curr) => acc + (curr.amount || 0), 0), [expenseRecords])
-  const netProfitVal = totalSalesVal - totalProcurementVal - totalExpensesVal
-
-  const topProduct = useMemo(() => {
-    if (productRecords.length === 0) return { name: 'No product data', units: 0 }
-    const sorted = [...productRecords].sort((a, b) => (b.salesQty || 0) - (a.salesQty || 0))
-    if (!sorted[0] || (sorted[0].salesQty || 0) === 0) {
-      return { name: 'No product data', units: 0 }
-    }
-    return { name: sorted[0].name || 'No product data', units: sorted[0].salesQty || 0 }
-  }, [productRecords])
-
-  const newFarmerLeads = useMemo(() => outreachRecords.reduce((acc, curr) => acc + (curr.newLeads || 0), 0), [outreachRecords])
-
-  const totalFarmersReached = useMemo(
-    () => outreachRecords.reduce((acc, curr) => acc + (curr.farmersReached || curr.attended || 0), 0),
-    [outreachRecords]
-  )
-
-  const conversionRateStr = totalFarmersReached > 0 ? `${((newFarmerLeads / totalFarmersReached) * 100).toFixed(1)}%` : '0%'
-
-  const weeklyChartData = useMemo(() => {
-    if (salesRecords.length === 0 && purchaseRecords.length === 0) {
-      return []
-    }
-    const map = new Map()
-    salesRecords.forEach((s) => {
-      const d = s.date || 'Today'
-      const prev = map.get(d) || { sales: 0, proc: 0 }
-      map.set(d, { ...prev, sales: prev.sales + s.amount })
-    })
-    purchaseRecords.forEach((p) => {
-      const d = p.date || 'Today'
-      const prev = map.get(d) || { sales: 0, proc: 0 }
-      map.set(d, { ...prev, proc: prev.proc + p.amount })
-    })
-    return Array.from(map.entries()).map(([date, val]) => ({ date, sales: val.sales, proc: val.proc }))
-  }, [salesRecords, purchaseRecords])
-
-  const salesSeriesLabel = chartMode === 'Previous Period' ? 'Previous Gross Sales (₹)' : 'Gross Sales Revenue (₹)'
-  const procSeriesLabel = chartMode === 'Previous Period' ? 'Previous Procurement (₹)' : 'Procurement Expense (₹)'
-
-  const getInfoPillText = () => {
-    if (weeklyChartData.length === 0) return 'No business data available'
-    if (chartMode === 'Current Period') {
-      const maxSale = Math.max(...weeklyChartData.map((d) => d.sales), 0)
-      return `Peak Revenue: ₹${maxSale.toLocaleString('en-IN')}`
-    } else if (chartMode === 'Previous Period') {
-      return 'Prior Peak: ₹0'
-    }
-    return `Outreach Impact Correlation: ${newFarmerLeads} New Leads`
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 rounded-xl bg-brand-danger-light border border-brand-danger-border text-brand-danger text-sm">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        <span>{error}</span>
+      </div>
+    )
   }
 
   return (
     <div className="space-y-4">
-      {/* 1. HERO / SUMMARY BANNER */}
-      <div className="bg-brand-surface border border-brand-border rounded-2xl p-5 shadow-xs relative overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="space-y-1.5">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-primary-light border border-brand-primary-dark/10 text-[11px] font-bold text-brand-primary">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-success opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-success"></span>
-              </span>
-              <span>LIVE HUB</span>
-            </div>
-
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-brand-text">
-              Rural Mart Operations &amp; Owner Overview
-            </h1>
-
-            <p className="text-xs text-brand-text-muted">
-              Real-time synchronization across sales, stock movements, and outreach conversions.
-            </p>
+      {toastMsg && (
+        <div className="p-3.5 rounded-xl bg-brand-primary text-white text-xs font-bold shadow-lg border border-white/20 flex items-center justify-between transition-all">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-white" />
+            <span>{toastMsg}</span>
           </div>
+          <button onClick={() => setToastMsg(null)} className="text-white/80 hover:text-white cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      <div className="bg-brand-surface border border-brand-border rounded-2xl p-5 shadow-xs relative overflow-hidden">
+        <div className="space-y-1.5">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-primary-light border border-brand-primary-dark/10 text-[11px] font-bold text-brand-primary">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-success opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-success"></span>
+            </span>
+            <span>LIVE HUB</span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-brand-text">Rural Mart Operations &amp; Owner Overview</h1>
+          <p className="text-xs text-brand-text-muted">Real-time synchronization across sales, stock movements, and outreach conversions.</p>
         </div>
       </div>
 
-      {/* 2. KPI STAT CARDS ROW */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <div className="card-enterprise p-4.5 space-y-2 relative overflow-hidden">
+        <div className="card-enterprise p-4.5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-brand-text-muted">TOTAL SALES</span>
             <div className="p-2 rounded-xl bg-brand-primary-light text-brand-primary">
               <TrendingUp className="w-4 h-4" />
             </div>
           </div>
-          <div>
-            <div className="text-2xl font-extrabold tracking-tight text-brand-text font-mono">
-              ₹{totalSalesVal.toLocaleString('en-IN')}
-            </div>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-[11px] font-bold text-brand-success flex items-center">
-                <ArrowUpRight className="w-3.5 h-3.5" /> 0%
-              </span>
-              <span className="text-[11px] text-brand-text-subtle">vs previous period</span>
-            </div>
-          </div>
+          <div className="text-2xl font-extrabold tracking-tight text-brand-text font-mono">{formatLakhsCr(data.salesRaw)}</div>
         </div>
 
-        <div className="card-enterprise p-4.5 space-y-2 relative overflow-hidden">
+        <div className="card-enterprise p-4.5 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-brand-text-muted">NET PROFIT (₹)</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-brand-text-muted">NET PROFIT</span>
             <div className="p-2 rounded-xl bg-brand-success-light text-brand-success">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
-          <div>
-            <div className="text-2xl font-extrabold tracking-tight text-brand-text font-mono">
-              ₹{netProfitVal.toLocaleString('en-IN')}
-            </div>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-[11px] font-bold text-brand-success flex items-center">
-                <ArrowUpRight className="w-3.5 h-3.5" /> 0%
-              </span>
-              <span className="text-[11px] text-brand-text-subtle">net margin</span>
-            </div>
-          </div>
+          <div className="text-2xl font-extrabold tracking-tight text-brand-text font-mono">{formatLakhsCr(data.netProfitRaw)}</div>
         </div>
 
-        <div className="card-enterprise p-4.5 space-y-2 relative overflow-hidden">
+        <div className="card-enterprise p-4.5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-brand-text-muted">TOP SELLING ITEM</span>
             <div className="p-2 rounded-xl bg-brand-info-light text-brand-info-dark">
               <Package className="w-4 h-4" />
             </div>
           </div>
-          <div>
-            <div className="text-lg font-bold tracking-tight text-brand-text truncate">{topProduct.name}</div>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-[11px] font-bold text-brand-info-dark">{topProduct.units} Units Sold</span>
-            </div>
-          </div>
+          <div className="text-lg font-bold tracking-tight text-brand-text truncate">{data.topProduct?.name ?? 'No sales recorded'}</div>
+          <span className="text-[11px] font-bold text-brand-info-dark">{data.topProduct ? `${data.topProduct.soldQty} ${data.topProduct.unit} sold` : ''}</span>
         </div>
 
-        <div className="card-enterprise p-4.5 space-y-2 relative overflow-hidden">
+        <div className="card-enterprise p-4.5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-brand-text-muted">NEW FARMER LEADS</span>
             <div className="p-2 rounded-xl bg-brand-info-light text-brand-info">
               <Users className="w-4 h-4" />
             </div>
           </div>
-          <div>
-            <div className="text-2xl font-extrabold tracking-tight text-brand-text font-mono">{newFarmerLeads} Farmers</div>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-[11px] font-bold text-brand-info flex items-center">
-                <ArrowUpRight className="w-3.5 h-3.5" /> {conversionRateStr}
-              </span>
-              <span className="text-[11px] text-brand-text-subtle">conversion rate</span>
-            </div>
-          </div>
+          <div className="text-2xl font-extrabold tracking-tight text-brand-text font-mono">{data.newFarmersCount}</div>
+          <span className="text-[11px] font-bold text-brand-info">{data.conversionRate}% converted to buyers</span>
         </div>
       </div>
 
-      {/* 3. MAIN CHART SECTION */}
-      <div className="card-enterprise p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-brand-border/60 pb-3">
+      <div className="bg-brand-surface border border-brand-border rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
+        <div className="flex items-center justify-between border-b border-brand-border/60 pb-2.5">
           <div>
-            <h3 className="text-base font-bold text-brand-text">Weekly Performance &amp; Demand Trends</h3>
-            <p className="text-xs text-brand-text-muted">Hover anywhere over chart area to inspect exact period analytics</p>
-          </div>
-
-          <div className="relative shrink-0">
-            <select
-              value={chartMode}
-              onChange={(e) => setChartMode(e.target.value)}
-              className="h-9 pr-8 pl-3 appearance-none text-xs font-bold rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-primary-dark focus:outline-none focus:ring-1 focus:ring-brand-primary cursor-pointer shadow-xs"
-            >
-              <option value="Current Period">Current Period</option>
-              <option value="Previous Period">Previous Period</option>
-              <option value="Outreach Overlay">Outreach Overlay</option>
-            </select>
-            <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-brand-primary pointer-events-none" />
+            <h2 className="text-sm font-bold text-brand-text uppercase tracking-wider flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-brand-primary" />
+              <span>QUICK ACTIONS</span>
+            </h2>
+            <p className="text-xs text-brand-text-muted">Execute daily operations instantly without leaving your overall dashboard.</p>
           </div>
         </div>
 
-        <div className="h-72 w-full pt-2 relative">
-          {weeklyChartData.length === 0 ? (
-            <div className="h-full w-full flex items-center justify-center text-xs text-brand-text-muted italic bg-brand-bg-subtle rounded-xl border border-brand-border/50">
-              No business data available
-            </div>
+        <div className="flex flex-wrap items-start gap-6">
+          <button type="button" onClick={() => setIsDailySalesModalOpen(true)} className="group flex flex-col items-center gap-2 cursor-pointer w-24">
+            <span className="relative">
+              <span className="flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-primary-light text-brand-primary shadow-xs border border-brand-primary/20 group-hover:scale-105 group-hover:bg-brand-primary group-hover:text-white transition-all">
+                <Receipt className="w-7 h-7" />
+              </span>
+              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-brand-surface border border-brand-border shadow-xs flex items-center justify-center text-brand-primary group-hover:border-brand-primary transition-colors">
+                <SquareArrowOutUpRight className="w-2.5 h-2.5" />
+              </span>
+            </span>
+            <span className="text-xs font-bold text-brand-text text-center group-hover:text-brand-primary transition-colors">Daily Sales &amp; Billing</span>
+          </button>
+
+          <button type="button" onClick={() => setIsProcurementModalOpen(true)} className="group flex flex-col items-center gap-2 cursor-pointer w-24">
+            <span className="relative">
+              <span className="flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-warning-light text-brand-warning-dark shadow-xs border border-brand-warning-border group-hover:scale-105 group-hover:bg-brand-warning group-hover:text-white transition-all">
+                <Truck className="w-7 h-7" />
+              </span>
+              <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-brand-surface border border-brand-border shadow-xs flex items-center justify-center text-brand-warning-dark group-hover:border-brand-warning transition-colors">
+                <SquareArrowOutUpRight className="w-2.5 h-2.5" />
+              </span>
+            </span>
+            <span className="text-xs font-bold text-brand-text text-center group-hover:text-brand-primary transition-colors">New Procurement</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="card-enterprise p-5 space-y-4">
+        <div className="border-b border-brand-border/60 pb-3">
+          <h3 className="text-base font-bold text-brand-text">Sales Trend</h3>
+          <p className="text-xs text-brand-text-muted">Last 8 months, your Rural Mart only</p>
+        </div>
+
+        <div className="h-72 w-full pt-2">
+          {data.trendData.length === 0 ? (
+            <div className="h-full w-full flex items-center justify-center text-xs text-brand-text-muted italic bg-brand-bg-subtle rounded-xl border border-brand-border/50">No business data available</div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={weeklyChartData}
-                onMouseMove={(e) => {
-                  if (e && e.activeLabel) {
-                    setHoveredDate(e.activeLabel)
-                  }
-                }}
-                onMouseLeave={() => setHoveredDate(null)}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridStroke} />
-                <XAxis dataKey="date" stroke={chartTheme.textColor} fontSize={11} tickLine={false} />
-                <YAxis stroke={chartTheme.textColor} fontSize={11} tickLine={false} tickFormatter={(v) => `₹${v}`} />
-                <Tooltip content={<CustomTooltip />} />
-
-                <Line
-                  type="monotone"
-                  dataKey="sales"
-                  name={salesSeriesLabel}
-                  stroke="#174F3A"
-                  strokeWidth={2.5}
-                  dot={{ r: 4, fill: '#174F3A' }}
-                  activeDot={{ r: 6 }}
-                />
-
-                <Line
-                  type="monotone"
-                  dataKey="proc"
-                  name={procSeriesLabel}
-                  stroke="#D97706"
-                  strokeWidth={2.5}
-                  strokeDasharray="5 5"
-                  dot={{ r: 4, fill: '#D97706' }}
-                  activeDot={{ r: 6 }}
-                />
+              <LineChart data={data.trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} vertical={false} />
+                <XAxis dataKey="period" tick={{ fill: CHART_COLORS.textMuted, fontSize: 11, fontWeight: 500 }} axisLine={{ stroke: CHART_COLORS.border }} tickLine={false} />
+                <YAxis tick={{ fill: CHART_COLORS.textMuted, fontSize: 11, fontWeight: 500 }} axisLine={false} tickLine={false} tickFormatter={(v) => `₹${v}L`} />
+                <Tooltip contentStyle={{ fontSize: '11px', borderRadius: '8px' }} />
+                <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: '11px', paddingBottom: '8px' }} />
+                <Line type="monotone" dataKey="sales" name="Sales (₹L)" stroke={CHART_COLORS.primary} strokeWidth={2.5} dot={{ r: 4, fill: CHART_COLORS.primary }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="grossProfit" name="Gross Profit (₹L)" stroke={CHART_COLORS.warning} strokeWidth={2.5} strokeDasharray="5 5" dot={{ r: 4, fill: CHART_COLORS.warning }} activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
           )}
         </div>
+      </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-brand-border/60">
-          <div className="flex items-center gap-5 text-xs font-semibold">
-            <div className="flex items-center gap-2 text-brand-text">
-              <span className="w-5 h-0.5 bg-brand-primary rounded-full inline-block"></span>
-              <span>{salesSeriesLabel}</span>
+      {isDailySalesModalOpen && (
+        <div className="fixed inset-0 z-50 bg-brand-text/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-brand-surface border border-brand-border rounded-2xl shadow-xl max-w-2xl w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-brand-border/60 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-brand-text flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-brand-primary" />
+                  <span>Daily Sale</span>
+                </h3>
+                <p className="text-xs text-brand-text-muted">Same billing panel as Daily Business — select or register a customer, add products, and record today's sale instantly.</p>
+              </div>
+              <button onClick={() => setIsDailySalesModalOpen(false)} className="text-brand-text-subtle hover:text-brand-text cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <div className="flex items-center gap-2 text-brand-text">
-              <span className="w-5 h-0.5 border-b-2 border-dashed border-brand-warning inline-block"></span>
-              <span>{procSeriesLabel}</span>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-2 justify-end shrink-0">
-            {hoveredDate && (
-              <span className="text-[11px] font-mono font-bold text-brand-primary bg-brand-primary-light px-2.5 py-1 rounded-lg border border-brand-primary-dark/10">
-                Hovered: {hoveredDate}
-              </span>
-            )}
-
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-bg-subtle border border-brand-border text-xs font-bold text-brand-text">
-              <Info className="w-3.5 h-3.5 text-brand-primary" />
-              <span>{getInfoPillText()}</span>
-            </div>
+            <BillingPanel
+              ref={billingPanelRef}
+              ruralMartId={ruralMartId}
+              refreshKey={refreshKey}
+              onDataChanged={bump}
+              onSaleGenerated={(info) => {
+                showToast(`Recorded Sale Bill #${info.billNumber} of ₹${info.amount.toLocaleString('en-IN')} for ${info.customerName}!`)
+                setIsDailySalesModalOpen(false)
+              }}
+            />
           </div>
         </div>
-      </div>
+      )}
+
+      {isProcurementModalOpen && (
+        <div className="fixed inset-0 z-50 bg-brand-text/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-brand-surface border border-brand-border rounded-2xl shadow-xl max-w-lg w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-brand-border/60 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-brand-text flex items-center gap-2">
+                  <Truck className="w-4 h-4 text-brand-primary" />
+                  <span>New Product Procurement Entry</span>
+                </h3>
+                <p className="text-xs text-brand-text-muted">Restock an existing product or register a new product.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsProcurementModalOpen(false)
+                  resetProcureForm()
+                }}
+                className="text-brand-text-subtle hover:text-brand-text cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {procError && (
+              <div className="p-3 rounded-xl bg-brand-danger-light border border-brand-danger-border text-brand-danger text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{procError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveProcurement} className="space-y-3">
+              <div className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border space-y-3">
+                <label className="block text-xs font-bold text-brand-text uppercase">1. Product Selection</label>
+                <select value={selectedProcureProductId} onChange={(e) => handleSelectProcureProduct(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text">
+                  <option value="">-- Choose Catalog Product --</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.category}) • Current Stock: {p.stockQty} {p.unit}
+                    </option>
+                  ))}
+                  <option value="NEW">+ Create New Product...</option>
+                </select>
+
+                {procureMode === 'NEW' && (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-xs font-semibold text-brand-text">
+                        Product Name <span className="text-brand-danger">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Concentrated Maize Feed"
+                        value={procName}
+                        onChange={(e) => setProcName(e.target.value)}
+                        className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-semibold text-brand-text">Category</label>
+                        <select value={procCategory} onChange={(e) => setProcCategory(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text">
+                          {PRODUCT_CATEGORIES.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-brand-text">
+                          Unit <span className="text-brand-danger">*</span>
+                        </label>
+                        <input type="text" required placeholder="e.g. kg" value={procUnit} onChange={(e) => setProcUnit(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text" />
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-brand-text-muted italic">Purchase and selling price will initialize from this procurement's cost — edit them anytime in Product &amp; Inventory.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border space-y-3">
+                <label className="block text-xs font-bold text-brand-text uppercase">2. Procurement Details</label>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-brand-text">
+                      Quantity <span className="text-brand-danger">*</span>
+                    </label>
+                    <input type="number" required min="0.001" step="0.001" placeholder="e.g. 100" value={procQty} onChange={(e) => setProcQty(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-brand-text">
+                      Total Cost (₹) <span className="text-brand-danger">*</span>
+                    </label>
+                    <input type="number" required min="0.01" step="0.01" placeholder="e.g. 4000" value={procCost} onChange={(e) => setProcCost(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-brand-text">Supplier Name</label>
+                    <input type="text" placeholder="e.g. Co-Op Union" value={procSupplier} onChange={(e) => setProcSupplier(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-brand-text">
+                      Date <span className="text-brand-danger">*</span>
+                    </label>
+                    <input type="date" required value={procDate} onChange={(e) => setProcDate(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-surface text-brand-text" />
+                  </div>
+                </div>
+
+                {procQty && procCost && Number(procQty) > 0 && (
+                  <div className="p-2.5 rounded-xl bg-brand-primary-light text-xs flex justify-between items-center font-bold text-brand-primary-dark">
+                    <span>Cost per Unit:</span>
+                    <span>₹{(Number(procCost) / Number(procQty)).toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-brand-border/60">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsProcurementModalOpen(false)
+                    resetProcureForm()
+                  }}
+                  className="h-9 px-4 rounded-xl border border-brand-border text-xs font-semibold hover:bg-brand-bg-subtle cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={procSubmitting} className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60">
+                  {procSubmitting ? 'Saving…' : 'Save & Record Procurement'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

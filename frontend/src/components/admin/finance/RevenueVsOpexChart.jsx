@@ -1,5 +1,4 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { REVENUE_OPEX_DATA } from '../../../lib/newPages/mockData'
 import { CHART_COLORS } from '../../../lib/newPages/chartColors'
 
 function CustomTooltip({ active, payload, label }) {
@@ -38,7 +37,7 @@ function CustomTooltip({ active, payload, label }) {
   return null
 }
 
-export default function RevenueVsOpexChart() {
+export default function RevenueVsOpexChart({ revenueOpexData = [] }) {
   return (
     <div className="bg-brand-surface border border-brand-border rounded-xl p-4 shadow-xs hover:shadow-md hover:-translate-y-0.5 hover:border-brand-primary/40 transition-all duration-200 flex flex-col justify-between">
       <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-brand-border">
@@ -46,13 +45,13 @@ export default function RevenueVsOpexChart() {
       </div>
 
       <div className="w-full h-72 md:h-80 relative">
-        {REVENUE_OPEX_DATA.length === 0 ? (
+        {revenueOpexData.length === 0 ? (
           <div className="h-full w-full flex items-center justify-center text-xs text-brand-text-muted italic bg-brand-bg-subtle rounded-xl border border-brand-border/50">
             No revenue/opex data available
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={REVENUE_OPEX_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <BarChart data={revenueOpexData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} vertical={false} />
               <XAxis dataKey="period" tick={{ fill: CHART_COLORS.textMuted, fontSize: 11, fontWeight: 500 }} axisLine={{ stroke: CHART_COLORS.border }} tickLine={false} />
               <YAxis tick={{ fill: CHART_COLORS.textMuted, fontSize: 11, fontWeight: 500 }} axisLine={false} tickLine={false} tickFormatter={(v) => `₹${v}L`} />

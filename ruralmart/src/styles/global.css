@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    @apply antialiased text-[#17221D] dark:text-[#E6ECE8] bg-[#F5F8F4] dark:bg-[#0B130F];
+  }
+}
+
+/* Custom scrollbars for dense enterprise views */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #DDE6E0;
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #1E3129;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #34735A;
+}
+
+/* Enterprise UI utility classes */
+.card-enterprise {
+  @apply bg-white dark:bg-[#121E19] border border-[#DDE6E0] dark:border-[#1E3129] rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] transition-all duration-150;
+}
+

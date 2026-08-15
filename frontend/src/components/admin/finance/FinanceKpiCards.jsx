@@ -1,7 +1,37 @@
 import { useState } from 'react'
-import { TrendingUp, ShoppingCart, PieChart, Wallet, Receipt, Percent, Info } from 'lucide-react'
+import { TrendingUp, TrendingDown, ShoppingCart, PieChart, Wallet, Receipt, Percent, Info } from 'lucide-react'
+import { CHART_COLORS } from '../../../lib/newPages/chartColors'
+import { formatLakhsCr } from '../../../lib/queries/finance'
 
-export default function FinanceKpiCards({ financialMarts }) {
+function SparklineSvg({ data, color }) {
+  if (!data || data.length < 2) return null
+  const min = Math.min(...data)
+  const max = Math.max(...data)
+  const range = max - min || 1
+  const width = 64
+  const height = 20
+
+  const points = data
+    .map((val, idx) => {
+      const x = (idx / (data.length - 1)) * width
+      const y = height - ((val - min) / range) * (height - 4) - 2
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+
+  return (
+    <svg width={width} height={height} className="overflow-visible shrink-0">
+      <polyline fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={points} />
+    </svg>
+  )
+}
+
+function growthOf(current, previous) {
+  if (previous > 0) return Math.round(((current - previous) / previous) * 1000) / 10
+  return current > 0 ? 100 : 0
+}
+
+export default function FinanceKpiCards({ financialMarts, trendData = [], billsGrowthData = [] }) {
   const [activeTooltip, setActiveTooltip] = useState(null)
 
   const totalSalesRaw = financialMarts.reduce((acc, m) => acc + m.salesRaw, 0)
@@ -10,21 +40,77 @@ export default function FinanceKpiCards({ financialMarts }) {
   const totalNetProfitRaw = financialMarts.reduce((acc, m) => acc + m.netProfitRaw, 0)
   const totalBillsSum = financialMarts.reduce((acc, m) => acc + m.totalBills, 0)
 
+  const totalPrevSalesRaw = financialMarts.reduce((acc, m) => acc + (m.prevSalesRaw || 0), 0)
+  const totalPrevProcurementRaw = financialMarts.reduce((acc, m) => acc + (m.prevProcurementRaw || 0), 0)
+  const totalPrevGrossProfitRaw = financialMarts.reduce((acc, m) => acc + (m.prevGrossProfitRaw || 0), 0)
+  const totalPrevNetProfitRaw = financialMarts.reduce((acc, m) => acc + (m.prevNetProfitRaw || 0), 0)
+  const totalPrevBillsSum = financialMarts.reduce((acc, m) => acc + (m.prevTotalBills || 0), 0)
+
   const overallMargin = totalSalesRaw > 0 ? ((totalNetProfitRaw / totalSalesRaw) * 100).toFixed(2) : '0.00'
   const overallAvgBill = totalBillsSum > 0 ? Math.round(totalSalesRaw / totalBillsSum) : 0
+  const prevOverallMargin = totalPrevSalesRaw > 0 ? (totalPrevNetProfitRaw / totalPrevSalesRaw) * 100 : 0
+  const prevOverallAvgBill = totalPrevBillsSum > 0 ? totalPrevSalesRaw / totalPrevBillsSum : 0
 
-  const formatLakhsCr = (valRaw) => {
-    if (valRaw >= 10000000) return `₹${(valRaw / 10000000).toFixed(2)} Cr`
-    return `₹${(valRaw / 100000).toFixed(1)} L`
-  }
+  // Sparklines & growth badges are derived from the same network-wide
+  // monthly trend series the charts below use, not per-KPI fabricated data.
+  const marginTrend = trendData.map((t) => (t.sales > 0 ? Math.round((t.netProfit / t.sales) * 1000) / 10 : 0))
+  const avgBillTrend = billsGrowthData.map((b) => b.avgBillValue)
 
   const kpis = [
-    { id: 'kpi-sales', label: 'Total Sales', value: formatLakhsCr(totalSalesRaw), icon: TrendingUp, tooltip: 'Total sales turnover realized across all active Rural Mart outposts.' },
-    { id: 'kpi-procurement', label: 'Procurement Value', value: formatLakhsCr(totalProcurementRaw), icon: ShoppingCart, tooltip: 'Total wholesale procurement expenditure for seed, fertilizer, and farm merchandise.' },
-    { id: 'kpi-gross-profit', label: 'Gross Profit', value: formatLakhsCr(totalGrossProfitRaw), icon: PieChart, tooltip: 'Revenue remaining after subtracting Cost of Goods Sold (COGS).' },
-    { id: 'kpi-net-profit', label: 'Net Profit', value: formatLakhsCr(totalNetProfitRaw), icon: Wallet, tooltip: 'Final net earnings after accounting for operating expenses, rent, and logistics overhead.' },
-    { id: 'kpi-avg-bill', label: 'Avg Bill Value', value: `₹${overallAvgBill.toLocaleString('en-IN')}`, icon: Receipt, tooltip: 'Average monetary amount spent per customer purchase bill across Rural Marts.' },
-    { id: 'kpi-profit-margin', label: 'Profit Margin', value: `${overallMargin}%`, icon: Percent, tooltip: 'Net profit expressed as a percentage of total revenue across the network.' },
+    {
+      id: 'kpi-sales',
+      label: 'Total Sales',
+      value: formatLakhsCr(totalSalesRaw),
+      icon: TrendingUp,
+      growthPercent: growthOf(totalSalesRaw, totalPrevSalesRaw),
+      sparklineData: trendData.map((t) => t.sales),
+      tooltip: 'Total sales turnover realized across all active Rural Mart outposts, for the selected period.',
+    },
+    {
+      id: 'kpi-procurement',
+      label: 'Procurement Value',
+      value: formatLakhsCr(totalProcurementRaw),
+      icon: ShoppingCart,
+      growthPercent: growthOf(totalProcurementRaw, totalPrevProcurementRaw),
+      sparklineData: trendData.map((t) => t.procurement),
+      tooltip: 'Total wholesale procurement expenditure for seed, fertilizer, and farm merchandise.',
+    },
+    {
+      id: 'kpi-gross-profit',
+      label: 'Gross Profit',
+      value: formatLakhsCr(totalGrossProfitRaw),
+      icon: PieChart,
+      growthPercent: growthOf(totalGrossProfitRaw, totalPrevGrossProfitRaw),
+      sparklineData: trendData.map((t) => t.grossProfit),
+      tooltip: 'Revenue remaining after subtracting Cost of Goods Sold (COGS / Procurement).',
+    },
+    {
+      id: 'kpi-net-profit',
+      label: 'Net Profit',
+      value: formatLakhsCr(totalNetProfitRaw),
+      icon: Wallet,
+      growthPercent: growthOf(totalNetProfitRaw, totalPrevNetProfitRaw),
+      sparklineData: trendData.map((t) => t.netProfit),
+      tooltip: 'Final net earnings after accounting for operating expenses.',
+    },
+    {
+      id: 'kpi-avg-bill',
+      label: 'Avg Bill Value',
+      value: `₹${overallAvgBill.toLocaleString('en-IN')}`,
+      icon: Receipt,
+      growthPercent: growthOf(overallAvgBill, prevOverallAvgBill),
+      sparklineData: avgBillTrend,
+      tooltip: 'Average monetary amount spent per customer purchase bill across Rural Marts.',
+    },
+    {
+      id: 'kpi-profit-margin',
+      label: 'Profit Margin',
+      value: `${overallMargin}%`,
+      icon: Percent,
+      growthPercent: growthOf(Number(overallMargin), prevOverallMargin),
+      sparklineData: marginTrend,
+      tooltip: 'Net profit expressed as a percentage of total revenue across the network.',
+    },
   ]
 
   return (
@@ -32,6 +118,7 @@ export default function FinanceKpiCards({ financialMarts }) {
       {kpis.map((kpi) => {
         const Icon = kpi.icon
         const isTooltipOpen = activeTooltip === kpi.id
+        const isPositive = kpi.growthPercent >= 0
 
         return (
           <div
@@ -64,6 +151,19 @@ export default function FinanceKpiCards({ financialMarts }) {
               <div className="w-7 h-7 rounded-lg bg-brand-primary-light text-brand-primary flex items-center justify-center shrink-0">
                 <Icon className="w-4 h-4" />
               </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 mt-1">
+              <span
+                className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  isPositive ? 'bg-brand-primary-light text-brand-primary-dark' : 'bg-brand-danger-light text-brand-danger'
+                }`}
+              >
+                {isPositive ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                {isPositive ? '+' : ''}
+                {kpi.growthPercent}%
+              </span>
+              <SparklineSvg data={kpi.sparklineData} color={isPositive ? CHART_COLORS.primary : '#dc2626'} />
             </div>
           </div>
         )

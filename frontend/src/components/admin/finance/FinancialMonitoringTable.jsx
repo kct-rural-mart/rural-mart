@@ -175,7 +175,7 @@ export default function FinancialMonitoringTable({ financialMarts, onSelectMart,
                         )}
                         {mart.trend === 'down' && (
                           <span className="inline-flex items-center gap-0.5 text-brand-danger font-bold text-[10px] bg-brand-danger-light px-1.5 py-0.5 rounded">
-                            <TrendingDown className="w-3 h-3" /> -3.2%
+                            <TrendingDown className="w-3 h-3" /> {mart.salesGrowthPercent}%
                           </span>
                         )}
                         {mart.trend === 'flat' && (

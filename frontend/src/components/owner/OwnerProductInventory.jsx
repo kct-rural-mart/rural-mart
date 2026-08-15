@@ -1,46 +1,56 @@
-import { useMemo, useState } from 'react'
-import { Package, Plus, AlertTriangle, Search, Edit2, PieChart as PieChartIcon, X, CheckCircle2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import { Package, Plus, AlertTriangle, Search, Edit2, PieChart as PieChartIcon, X, CheckCircle2, Truck, Loader2, AlertCircle } from 'lucide-react'
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts'
 import { getChartTheme } from '../../lib/newPages/chartColors'
-import { getProductsByRuralMart, saveProduct, updateProduct } from '../../lib/newPages/shared/dataServices'
-import { getStoredSession } from '../../lib/newPages/storageService'
+import { getOwnerProducts, addProduct, updateProductPrices, recordProcurement, PRODUCT_CATEGORIES } from '../../lib/queries/ownerProducts'
+import { getLocalToday } from '../../utils/date'
 
-// Fixed categorical palette for the pie chart - not tied to a single semantic token,
-// each entry is a distinct product category color.
-const CATEGORY_COLORS = ['#174F3A', '#22C55E', '#3B82F6', '#F59E0B', '#8B5CF6']
+const CATEGORY_COLORS = ['#174F3A', '#22C55E', '#3B82F6', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316']
 
 export default function OwnerProductInventory() {
+  const { ruralMartId, refreshKey: layoutRefreshKey } = useOutletContext()
   const chartTheme = getChartTheme()
 
-  const session = getStoredSession()
-  const ruralMartId = session?.ruralMartId || session?.email || ''
-
-  const [products, setProducts] = useState(() => {
-    if (!ruralMartId) return []
-    const canonical = getProductsByRuralMart(ruralMartId)
-    if (canonical && canonical.length > 0) {
-      return canonical.map((cp) => ({
-        id: cp.id,
-        code: cp.code,
-        name: cp.name,
-        category: cp.category,
-        supplier: cp.supplier || 'N/A',
-        price: cp.sellingPrice,
-        stockQty: cp.stockQty,
-        unit: cp.unit || 'units',
-        isLowStock: cp.status === 'Low Stock' || cp.stockQty <= (cp.reorderLevel || 35),
-      }))
-    }
-    return []
-  })
+  const [products, setProducts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [localRefresh, setLocalRefresh] = useState(0)
   const [tableSearch, setTableSearch] = useState('')
+  const [toastMessage, setToastMessage] = useState(null)
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function load() {
+      setLoading(true)
+      setError('')
+      try {
+        const result = await getOwnerProducts(ruralMartId)
+        if (isMounted) setProducts(result)
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load products.')
+      } finally {
+        if (isMounted) setLoading(false)
+      }
+    }
+
+    if (ruralMartId) load()
+    return () => {
+      isMounted = false
+    }
+  }, [ruralMartId, layoutRefreshKey, localRefresh])
+
+  const triggerToast = (msg) => {
+    setToastMessage(msg)
+    setTimeout(() => setToastMessage(null), 4000)
+  }
 
   const categoryShareData = useMemo(() => {
     if (products.length === 0) return []
     const counts = {}
     products.forEach((p) => {
-      const cat = p.category || 'Others'
-      counts[cat] = (counts[cat] || 0) + p.price * p.stockQty
+      counts[p.category] = (counts[p.category] || 0) + p.purchasePrice * p.stockQty
     })
     const totalVal = Object.values(counts).reduce((a, b) => a + b, 0)
     if (totalVal === 0) return []
@@ -51,135 +61,164 @@ export default function OwnerProductInventory() {
     }))
   }, [products])
 
-  const lowStockItems = useMemo(() => products.filter((p) => p.isLowStock || p.stockQty <= 35), [products])
+  // No reorder-level column exists in the schema, so "Low Stock" (a
+  // threshold below full) isn't something we can honestly compute - only
+  // "Out of Stock" (qty <= 0) is unambiguous from real data.
+  const outOfStockItems = useMemo(() => products.filter((p) => p.stockQty <= 0), [products])
 
-  const [toastMessage, setToastMessage] = useState(null)
+  const topSellingProduct = useMemo(() => {
+    if (products.length === 0) return null
+    const sorted = [...products].sort((a, b) => b.soldQty - a.soldQty)
+    return sorted[0]?.soldQty > 0 ? sorted[0] : null
+  }, [products])
+
+  const totalStockValue = useMemo(() => products.reduce((acc, p) => acc + p.inventoryValue, 0), [products])
 
   const [isAddProductOpen, setIsAddProductOpen] = useState(false)
   const [addName, setAddName] = useState('')
-  const [addCategory, setAddCategory] = useState('Feed')
-  const [addSupplier, setAddSupplier] = useState('')
-  const [addPrice, setAddPrice] = useState('')
-  const [addStock, setAddStock] = useState('')
+  const [addCategory, setAddCategory] = useState(PRODUCT_CATEGORIES[0])
+  const [addUnit, setAddUnit] = useState('')
+  const [addPurchasePrice, setAddPurchasePrice] = useState('')
+  const [addSellingPrice, setAddSellingPrice] = useState('')
+  const [addSubmitting, setAddSubmitting] = useState(false)
+  const [addError, setAddError] = useState('')
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState(null)
-  const [editName, setEditName] = useState('')
-  const [editCategory, setEditCategory] = useState('Feed')
-  const [editSupplier, setEditSupplier] = useState('')
-  const [editPrice, setEditPrice] = useState('')
-  const [editStock, setEditStock] = useState('')
+  const [editPurchasePrice, setEditPurchasePrice] = useState('')
+  const [editSellingPrice, setEditSellingPrice] = useState('')
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [editError, setEditError] = useState('')
 
-  const triggerToast = (msg) => {
-    setToastMessage(msg)
-    setTimeout(() => setToastMessage(null), 4000)
+  const [isProcureModalOpen, setIsProcureModalOpen] = useState(false)
+  const [procureProductId, setProcureProductId] = useState('')
+  const [procureQty, setProcureQty] = useState('')
+  const [procureCost, setProcureCost] = useState('')
+  const [procureSupplier, setProcureSupplier] = useState('')
+  const [procureDate, setProcureDate] = useState(getLocalToday())
+  const [procureSubmitting, setProcureSubmitting] = useState(false)
+  const [procureError, setProcureError] = useState('')
+
+  const resetAddForm = () => {
+    setAddName('')
+    setAddCategory(PRODUCT_CATEGORIES[0])
+    setAddUnit('')
+    setAddPurchasePrice('')
+    setAddSellingPrice('')
+    setAddError('')
   }
 
-  const handleAddProductSubmit = (e) => {
+  const handleAddProductSubmit = async (e) => {
     e.preventDefault()
-    if (!addName.trim()) return
-
-    const priceVal = Number(addPrice) || 0
-    const stockVal = Number(addStock) || 0
-
-    const newPrdCode = `PRD-0${products.length + 1}`
-    const newPrdId = `prd-${Date.now()}`
-    const supplierVal = addSupplier.trim() || 'N/A'
-    const newProduct = {
-      id: newPrdId,
-      code: newPrdCode,
-      name: addName.trim(),
-      category: addCategory,
-      supplier: supplierVal,
-      price: priceVal,
-      stockQty: stockVal,
-      unit: 'units',
-      isLowStock: stockVal <= 35,
+    if (!addName.trim() || !addUnit.trim()) return
+    setAddSubmitting(true)
+    setAddError('')
+    try {
+      await addProduct({
+        ruralMartId,
+        category: addCategory,
+        name: addName.trim(),
+        unit: addUnit.trim(),
+        purchasePrice: Number(addPurchasePrice) || 0,
+        sellingPrice: Number(addSellingPrice) || 0,
+      })
+      setIsAddProductOpen(false)
+      resetAddForm()
+      setLocalRefresh((k) => k + 1)
+      triggerToast(`"${addName.trim()}" added to inventory catalog!`)
+    } catch (err) {
+      setAddError(err.message || 'Failed to add product.')
+    } finally {
+      setAddSubmitting(false)
     }
-
-    saveProduct({
-      id: newPrdId,
-      ruralMartId: 'RM-001',
-      code: newPrdCode,
-      name: addName.trim(),
-      category: addCategory,
-      district: 'Erode',
-      supplier: supplierVal,
-      costPrice: Math.round(priceVal * 0.85),
-      sellingPrice: priceVal,
-      stockQty: stockVal,
-      unit: 'units',
-      reorderLevel: 35,
-      status: stockVal === 0 ? 'Out of Stock' : stockVal <= 35 ? 'Low Stock' : 'Healthy',
-      lastRestocked: 'Today',
-      salesQty: 0,
-      procurementQty: stockVal,
-      inventoryValue: stockVal * priceVal,
-    })
-
-    setProducts((prev) => [newProduct, ...prev])
-    setIsAddProductOpen(false)
-    triggerToast(`"${addName.trim()}" added to inventory catalog!`)
-
-    setAddName('')
-    setAddCategory('Feed')
-    setAddSupplier('')
-    setAddPrice('')
-    setAddStock('')
   }
 
   const handleOpenEdit = (prd) => {
     setEditingProduct(prd)
-    setEditName(prd.name)
-    setEditCategory(prd.category)
-    setEditSupplier(prd.supplier)
-    setEditPrice(String(prd.price))
-    setEditStock(String(prd.stockQty))
+    setEditPurchasePrice(String(prd.purchasePrice))
+    setEditSellingPrice(String(prd.sellingPrice))
+    setEditError('')
     setIsEditModalOpen(true)
   }
 
-  const handleEditProductSubmit = (e) => {
+  const handleEditProductSubmit = async (e) => {
     e.preventDefault()
     if (!editingProduct) return
+    setEditSubmitting(true)
+    setEditError('')
+    try {
+      await updateProductPrices(editingProduct.id, {
+        purchasePrice: Number(editPurchasePrice) || 0,
+        sellingPrice: Number(editSellingPrice) || 0,
+      })
+      setIsEditModalOpen(false)
+      setEditingProduct(null)
+      setLocalRefresh((k) => k + 1)
+      triggerToast(`"${editingProduct.name}" prices updated.`)
+    } catch (err) {
+      setEditError(err.message || 'Failed to update product.')
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
 
-    const priceVal = Number(editPrice) || 0
-    const stockVal = Number(editStock) || 0
-    const updatedName = editName.trim() || editingProduct.name
-    const updatedSupplier = editSupplier.trim() || editingProduct.supplier
+  const resetProcureForm = () => {
+    setProcureProductId('')
+    setProcureQty('')
+    setProcureCost('')
+    setProcureSupplier('')
+    setProcureDate(getLocalToday())
+    setProcureError('')
+  }
 
-    updateProduct(editingProduct.id, {
-      name: updatedName,
-      category: editCategory,
-      supplier: updatedSupplier,
-      sellingPrice: priceVal,
-      stockQty: stockVal,
-      status: stockVal === 0 ? 'Out of Stock' : stockVal <= 35 ? 'Low Stock' : 'Healthy',
-      inventoryValue: stockVal * priceVal,
-    })
-
-    setProducts((prev) =>
-      prev.map((p) =>
-        p.id === editingProduct.id
-          ? { ...p, name: updatedName, category: editCategory, supplier: updatedSupplier, price: priceVal, stockQty: stockVal, isLowStock: stockVal <= 35 }
-          : p
-      )
-    )
-
-    setIsEditModalOpen(false)
-    setEditingProduct(null)
-    triggerToast(`"${updatedName}" updated successfully.`)
+  const handleProcureSubmit = async (e) => {
+    e.preventDefault()
+    if (!procureProductId || !procureQty || !procureCost) return
+    setProcureSubmitting(true)
+    setProcureError('')
+    try {
+      await recordProcurement({
+        ruralMartId,
+        productId: procureProductId,
+        quantity: Number(procureQty),
+        cost: Number(procureCost),
+        supplierName: procureSupplier.trim(),
+        procurementDate: procureDate,
+      })
+      setIsProcureModalOpen(false)
+      resetProcureForm()
+      setLocalRefresh((k) => k + 1)
+      triggerToast('Procurement recorded and stock updated.')
+    } catch (err) {
+      setProcureError(err.message || 'Failed to record procurement.')
+    } finally {
+      setProcureSubmitting(false)
+    }
   }
 
   const effectiveSearch = tableSearch.toLowerCase().trim()
   const filteredProducts = products.filter((p) => {
     if (!effectiveSearch) return true
-    return (
-      p.name.toLowerCase().includes(effectiveSearch) ||
-      p.category.toLowerCase().includes(effectiveSearch) ||
-      p.supplier.toLowerCase().includes(effectiveSearch) ||
-      p.code.toLowerCase().includes(effectiveSearch)
-    )
+    return p.name.toLowerCase().includes(effectiveSearch) || p.category.toLowerCase().includes(effectiveSearch)
   })
+
+  if (loading && products.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-brand-text-muted gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        <span className="text-sm font-medium">Loading products…</span>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 rounded-xl bg-brand-danger-light border border-brand-danger-border text-brand-danger text-sm">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        <span>{error}</span>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -201,60 +240,59 @@ export default function OwnerProductInventory() {
             ACTIVE BUSINESS DATE: {new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()}
           </span>
           <h1 className="text-xl font-bold text-brand-text">Product-wise Sales &amp; Inventory</h1>
-          <p className="text-xs text-brand-text-muted">Analyze product performance, manage stock distributions, and adjust pricing.</p>
+          <p className="text-xs text-brand-text-muted">Manage your catalog, record procurement, and adjust pricing.</p>
         </div>
 
-        <button
-          onClick={() => setIsAddProductOpen(true)}
-          className="h-9 px-4 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0 self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>+ Add New Product</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setIsProcureModalOpen(true)}
+            className="h-9 px-4 bg-brand-surface hover:bg-brand-bg-subtle border border-brand-border text-brand-text text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+          >
+            <Truck className="w-4 h-4" />
+            <span>Record Procurement</span>
+          </button>
+          <button
+            onClick={() => setIsAddProductOpen(true)}
+            className="h-9 px-4 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New Product</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="card-enterprise p-4 space-y-2">
           <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">TOP SELLING PRODUCT</span>
           <div>
-            <h3 className="text-sm font-bold text-brand-text">{products.length > 0 ? products[0].name : 'No product data'}</h3>
-            <div className="text-xl font-extrabold text-brand-text mt-0.5">
-              {products.length > 0 ? `₹${(products[0].price * products[0].stockQty).toLocaleString('en-IN')}` : '₹0'}
-            </div>
+            <h3 className="text-sm font-bold text-brand-text">{topSellingProduct ? topSellingProduct.name : 'No sales recorded'}</h3>
+            <div className="text-xl font-extrabold text-brand-text mt-0.5">₹{(topSellingProduct?.revenue ?? 0).toLocaleString('en-IN')}</div>
           </div>
           <div className="text-[11px] font-semibold text-brand-success flex items-center gap-1">
-            <span>{products.length > 0 ? 'Top Stock Item' : 'No sales recorded'}</span>
+            <span>{topSellingProduct ? `${topSellingProduct.soldQty} ${topSellingProduct.unit} sold` : 'No sales recorded'}</span>
           </div>
         </div>
 
         <div className="card-enterprise p-4 space-y-2">
           <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">STOCK VALUE</span>
           <div>
-            <div className="text-xl font-extrabold text-brand-text">
-              ₹{products.reduce((acc, p) => acc + p.price * p.stockQty, 0).toLocaleString('en-IN')}
-            </div>
+            <div className="text-xl font-extrabold text-brand-text">₹{totalStockValue.toLocaleString('en-IN')}</div>
             <div className="text-[11px] font-semibold text-brand-success flex items-center gap-1 mt-0.5">
               <span>{products.length} Active Catalog SKUs</span>
             </div>
           </div>
-          <p className="text-[11px] text-brand-text-muted font-medium border-t border-brand-border/60 pt-2">
-            {products.length > 0 ? 'Dynamic Category Inventory' : 'No inventory records found'}
-          </p>
+          <p className="text-[11px] text-brand-text-muted font-medium border-t border-brand-border/60 pt-2">Purchase price × current stock, across all products</p>
         </div>
 
         <div className="card-enterprise p-4 space-y-2">
-          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">SUPPLIER INVENTORY VALUE</span>
+          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">OUT OF STOCK</span>
           <div>
-            <div className="text-xl font-extrabold text-brand-text">
-              ₹{products.reduce((acc, p) => acc + p.price * p.stockQty, 0).toLocaleString('en-IN')}
-            </div>
-            <div className="text-[11px] font-semibold text-brand-success flex items-center gap-1 mt-0.5">
-              <span>{Array.from(new Set(products.map((p) => p.supplier))).filter((s) => s && s !== 'N/A').length} Active Suppliers</span>
+            <div className="text-xl font-extrabold text-brand-text">{outOfStockItems.length}</div>
+            <div className="text-[11px] font-semibold text-brand-warning flex items-center gap-1 mt-0.5">
+              <span>{outOfStockItems.length > 0 ? 'Needs procurement' : 'All products in stock'}</span>
             </div>
           </div>
-          <p className="text-[11px] text-brand-text-muted font-medium border-t border-brand-border/60 pt-2">
-            {products.length > 0 ? 'Supplier Inventory Breakdown' : 'No supplier data available'}
-          </p>
+          <p className="text-[11px] text-brand-text-muted font-medium border-t border-brand-border/60 pt-2">Products with zero or negative stock</p>
         </div>
       </div>
 
@@ -281,13 +319,7 @@ export default function OwnerProductInventory() {
                         ))}
                       </Pie>
                       <Tooltip
-                        contentStyle={{
-                          backgroundColor: chartTheme.tooltipBg,
-                          borderColor: chartTheme.tooltipBorder,
-                          color: chartTheme.tooltipTextColor,
-                          borderRadius: '8px',
-                          fontSize: '11px',
-                        }}
+                        contentStyle={{ backgroundColor: chartTheme.tooltipBg, borderColor: chartTheme.tooltipBorder, color: chartTheme.tooltipTextColor, borderRadius: '8px', fontSize: '11px' }}
                         formatter={(val, name) => [`${val}%`, name]}
                       />
                     </PieChart>
@@ -311,22 +343,20 @@ export default function OwnerProductInventory() {
           <div className="card-enterprise p-4 sm:p-5 space-y-3">
             <div className="flex items-center gap-2 border-b border-brand-border/60 pb-2.5">
               <AlertTriangle className="w-4 h-4 text-brand-warning" />
-              <h2 className="text-sm font-bold text-brand-text uppercase tracking-wider">STOCK ALERTS &amp; FAST MOVERS</h2>
+              <h2 className="text-sm font-bold text-brand-text uppercase tracking-wider">OUT OF STOCK</h2>
             </div>
 
             <div className="space-y-2 text-xs">
-              {lowStockItems.length === 0 ? (
-                <div className="p-3 text-xs text-brand-text-muted italic text-center">No stock alerts</div>
+              {outOfStockItems.length === 0 ? (
+                <div className="p-3 text-xs text-brand-text-muted italic text-center">No out-of-stock products</div>
               ) : (
-                lowStockItems.map((item) => (
+                outOfStockItems.map((item) => (
                   <div key={item.id} className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border flex items-center justify-between">
                     <div>
                       <h3 className="font-bold text-brand-text">{item.name}</h3>
-                      <p className="text-[11px] text-brand-text-muted">Only {item.stockQty} {item.unit || 'units'} remaining</p>
+                      <p className="text-[11px] text-brand-text-muted">{item.stockQty} {item.unit} in stock</p>
                     </div>
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-brand-warning-light text-brand-warning-dark">
-                      Reorder Soon
-                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-brand-warning-light text-brand-warning-dark">Procure Soon</span>
                   </div>
                 ))
               )}
@@ -345,7 +375,7 @@ export default function OwnerProductInventory() {
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-brand-text-subtle" />
               <input
                 type="text"
-                placeholder="Search products, suppliers..."
+                placeholder="Search products, categories..."
                 value={tableSearch}
                 onChange={(e) => setTableSearch(e.target.value)}
                 className="w-full h-8 pl-8 pr-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
@@ -359,8 +389,8 @@ export default function OwnerProductInventory() {
                 <tr className="border-b border-brand-border text-brand-text-muted font-semibold text-[11px]">
                   <th className="pb-2.5">PRODUCT NAME</th>
                   <th className="pb-2.5">CATEGORY</th>
-                  <th className="pb-2.5">SUPPLIER</th>
-                  <th className="pb-2.5 text-right">PRICE</th>
+                  <th className="pb-2.5 text-right">PURCHASE PRICE</th>
+                  <th className="pb-2.5 text-right">SELLING PRICE</th>
                   <th className="pb-2.5 text-center">IN STOCK</th>
                   <th className="pb-2.5 text-right">ACTION</th>
                 </tr>
@@ -372,15 +402,11 @@ export default function OwnerProductInventory() {
                     <td className="py-2.5 text-brand-text-muted">
                       <span className="px-2 py-0.5 rounded-md bg-brand-primary-light text-brand-primary font-semibold text-[10px]">{p.category}</span>
                     </td>
-                    <td className="py-2.5 text-brand-text-muted">{p.supplier}</td>
-                    <td className="py-2.5 text-right font-bold text-brand-text">₹{p.price.toLocaleString('en-IN')}</td>
+                    <td className="py-2.5 text-right text-brand-text-muted">₹{p.purchasePrice.toLocaleString('en-IN')}</td>
+                    <td className="py-2.5 text-right font-bold text-brand-text">₹{p.sellingPrice.toLocaleString('en-IN')}</td>
                     <td className="py-2.5 text-center">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                          p.isLowStock || p.stockQty <= 35 ? 'bg-brand-warning-light text-brand-warning-dark' : 'bg-brand-success-light text-brand-success'
-                        }`}
-                      >
-                        {p.stockQty} {p.unit || 'units'}
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold ${p.stockQty <= 0 ? 'bg-brand-warning-light text-brand-warning-dark' : 'bg-brand-success-light text-brand-success'}`}>
+                        {p.stockQty} {p.unit}
                       </span>
                     </td>
                     <td className="py-2.5 text-right">
@@ -389,7 +415,7 @@ export default function OwnerProductInventory() {
                         className="h-7 px-3 bg-brand-surface hover:bg-brand-primary-light border border-brand-border text-brand-primary text-[11px] font-bold rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
                       >
                         <Edit2 className="w-3 h-3" />
-                        <span>Edit</span>
+                        <span>Edit Prices</span>
                       </button>
                     </td>
                   </tr>
@@ -419,12 +445,25 @@ export default function OwnerProductInventory() {
                 </h3>
                 <p className="text-[11px] text-brand-text-muted">Create a new item entry in your active inventory catalog.</p>
               </div>
-              <button onClick={() => setIsAddProductOpen(false)} className="text-brand-text-subtle hover:text-brand-text cursor-pointer">
+              <button
+                onClick={() => {
+                  setIsAddProductOpen(false)
+                  resetAddForm()
+                }}
+                className="text-brand-text-subtle hover:text-brand-text cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleAddProductSubmit} className="space-y-3">
+              {addError && (
+                <div className="p-2.5 rounded-lg bg-brand-danger-light border border-brand-danger-border text-brand-danger text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{addError}</span>
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-brand-text">
                   Product Name <span className="text-brand-danger">*</span>
@@ -432,7 +471,7 @@ export default function OwnerProductInventory() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Bio-Organic Growth Promoter"
+                  placeholder="e.g. Cattle Feed Supplement"
                   value={addName}
                   onChange={(e) => setAddName(e.target.value)}
                   className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
@@ -443,26 +482,25 @@ export default function OwnerProductInventory() {
                 <label className="block text-xs font-semibold text-brand-text">
                   Category <span className="text-brand-danger">*</span>
                 </label>
-                <select
-                  value={addCategory}
-                  onChange={(e) => setAddCategory(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                >
-                  <option value="Feed">Feed</option>
-                  <option value="Minerals">Minerals</option>
-                  <option value="Organic Fertilizers">Organic Fertilizers</option>
-                  <option value="Equip">Equip</option>
-                  <option value="Others">Others</option>
+                <select value={addCategory} onChange={(e) => setAddCategory(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text">
+                  {PRODUCT_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
                 </select>
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-semibold text-brand-text">Supplier Name</label>
+                <label className="block text-xs font-semibold text-brand-text">
+                  Unit <span className="text-brand-danger">*</span>
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. Agro Care Pvt. Ltd."
-                  value={addSupplier}
-                  onChange={(e) => setAddSupplier(e.target.value)}
+                  required
+                  placeholder="e.g. kg, litre, piece, bag"
+                  value={addUnit}
+                  onChange={(e) => setAddUnit(e.target.value)}
                   className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
                 />
               </div>
@@ -470,43 +508,56 @@ export default function OwnerProductInventory() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-brand-text">
-                    Unit Selling Price (₹) <span className="text-brand-danger">*</span>
+                    Purchase Price (₹) <span className="text-brand-danger">*</span>
                   </label>
                   <input
                     type="number"
                     required
-                    placeholder="450"
-                    value={addPrice}
-                    onChange={(e) => setAddPrice(e.target.value)}
+                    min="0"
+                    step="0.01"
+                    placeholder="350"
+                    value={addPurchasePrice}
+                    onChange={(e) => setAddPurchasePrice(e.target.value)}
                     className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-brand-text">Initial Opening Stock (Units)</label>
+                  <label className="block text-xs font-semibold text-brand-text">
+                    Selling Price (₹) <span className="text-brand-danger">*</span>
+                  </label>
                   <input
                     type="number"
-                    placeholder="100"
-                    value={addStock}
-                    onChange={(e) => setAddStock(e.target.value)}
+                    required
+                    min="0"
+                    step="0.01"
+                    placeholder="450"
+                    value={addSellingPrice}
+                    onChange={(e) => setAddSellingPrice(e.target.value)}
                     className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
                   />
                 </div>
               </div>
 
+              <p className="text-[11px] text-brand-text-muted italic">New products start with zero stock — use "Record Procurement" to add opening stock.</p>
+
               <div className="pt-3 flex justify-end gap-2 border-t border-brand-border/60">
                 <button
                   type="button"
-                  onClick={() => setIsAddProductOpen(false)}
+                  onClick={() => {
+                    setIsAddProductOpen(false)
+                    resetAddForm()
+                  }}
                   className="h-9 px-4 rounded-xl border border-brand-border text-xs font-semibold hover:bg-brand-bg-subtle cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                  disabled={addSubmitting}
+                  className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60"
                 >
-                  + Add to Catalog
+                  {addSubmitting ? 'Adding…' : '+ Add to Catalog'}
                 </button>
               </div>
             </form>
@@ -521,10 +572,10 @@ export default function OwnerProductInventory() {
               <div>
                 <h3 className="text-base font-bold text-brand-text flex items-center gap-2">
                   <Edit2 className="w-4 h-4 text-brand-primary" />
-                  <span>Edit Stock &amp; Pricing</span>
+                  <span>Edit Pricing</span>
                 </h3>
                 <p className="text-[11px] font-medium text-brand-text-muted">
-                  {editingProduct.name} ({editingProduct.code}) • {editingProduct.category}
+                  {editingProduct.name} • {editingProduct.category}
                 </p>
               </div>
               <button onClick={() => setIsEditModalOpen(false)} className="text-brand-text-subtle hover:text-brand-text cursor-pointer">
@@ -532,95 +583,181 @@ export default function OwnerProductInventory() {
               </button>
             </div>
 
-            {(editingProduct.isLowStock || Number(editStock) <= 35) && (
-              <div className="p-2.5 rounded-xl bg-brand-warning-light border border-brand-warning-border text-brand-warning-dark text-xs font-bold flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-brand-warning shrink-0" />
-                <span>Low Stock Alert — Reorder recommended</span>
-              </div>
-            )}
-
             <form onSubmit={handleEditProductSubmit} className="space-y-3">
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-brand-text">
-                  Product Name <span className="text-brand-danger">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-brand-text">
-                  Category <span className="text-brand-danger">*</span>
-                </label>
-                <select
-                  value={editCategory}
-                  onChange={(e) => setEditCategory(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                >
-                  <option value="Feed">Feed</option>
-                  <option value="Minerals">Minerals</option>
-                  <option value="Organic Fertilizers">Organic Fertilizers</option>
-                  <option value="Equip">Equip</option>
-                  <option value="Others">Others</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-brand-text">Supplier Name</label>
-                <input
-                  type="text"
-                  value={editSupplier}
-                  onChange={(e) => setEditSupplier(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                />
-              </div>
+              {editError && (
+                <div className="p-2.5 rounded-lg bg-brand-danger-light border border-brand-danger-border text-brand-danger text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{editError}</span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-brand-text">
-                    Unit Selling Price (₹) <span className="text-brand-danger">*</span>
+                    Purchase Price (₹) <span className="text-brand-danger">*</span>
                   </label>
                   <input
                     type="number"
                     required
-                    value={editPrice}
-                    onChange={(e) => setEditPrice(e.target.value)}
+                    min="0"
+                    step="0.01"
+                    value={editPurchasePrice}
+                    onChange={(e) => setEditPurchasePrice(e.target.value)}
                     className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
                   />
                 </div>
 
                 <div className="space-y-1">
                   <label className="block text-xs font-semibold text-brand-text">
-                    Current Stock (Units) <span className="text-brand-danger">*</span>
+                    Selling Price (₹) <span className="text-brand-danger">*</span>
                   </label>
                   <input
                     type="number"
                     required
-                    value={editStock}
-                    onChange={(e) => setEditStock(e.target.value)}
+                    min="0"
+                    step="0.01"
+                    value={editSellingPrice}
+                    onChange={(e) => setEditSellingPrice(e.target.value)}
                     className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
                   />
                 </div>
               </div>
 
               <div className="pt-3 flex justify-end gap-2 border-t border-brand-border/60">
+                <button type="button" onClick={() => setIsEditModalOpen(false)} className="h-9 px-4 rounded-xl border border-brand-border text-xs font-semibold hover:bg-brand-bg-subtle cursor-pointer">
+                  Cancel
+                </button>
+                <button type="submit" disabled={editSubmitting} className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60">
+                  {editSubmitting ? 'Saving…' : 'Save Prices'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {isProcureModalOpen && (
+        <div className="fixed inset-0 z-50 bg-brand-text/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-brand-surface border border-brand-border rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-brand-border/60 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-brand-text flex items-center gap-2">
+                  <Truck className="w-4 h-4 text-brand-primary" />
+                  <span>Record Procurement</span>
+                </h3>
+                <p className="text-[11px] text-brand-text-muted">Log a new stock purchase batch. This updates the product's current stock.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsProcureModalOpen(false)
+                  resetProcureForm()
+                }}
+                className="text-brand-text-subtle hover:text-brand-text cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleProcureSubmit} className="space-y-3">
+              {procureError && (
+                <div className="p-2.5 rounded-lg bg-brand-danger-light border border-brand-danger-border text-brand-danger text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{procureError}</span>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-brand-text">
+                  Product <span className="text-brand-danger">*</span>
+                </label>
+                <select
+                  required
+                  value={procureProductId}
+                  onChange={(e) => setProcureProductId(e.target.value)}
+                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
+                >
+                  <option value="">Select a product…</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.unit})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-brand-text">
+                    Quantity <span className="text-brand-danger">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0.001"
+                    step="0.001"
+                    value={procureQty}
+                    onChange={(e) => setProcureQty(e.target.value)}
+                    className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-brand-text">
+                    Total Cost (₹) <span className="text-brand-danger">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={procureCost}
+                    onChange={(e) => setProcureCost(e.target.value)}
+                    className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-brand-text">Supplier Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Agro Care Pvt. Ltd."
+                  value={procureSupplier}
+                  onChange={(e) => setProcureSupplier(e.target.value)}
+                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-brand-text">
+                  Procurement Date <span className="text-brand-danger">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={procureDate}
+                  onChange={(e) => setProcureDate(e.target.value)}
+                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
+                />
+              </div>
+
+              <div className="pt-3 flex justify-end gap-2 border-t border-brand-border/60">
                 <button
                   type="button"
-                  onClick={() => setIsEditModalOpen(false)}
+                  onClick={() => {
+                    setIsProcureModalOpen(false)
+                    resetProcureForm()
+                  }}
                   className="h-9 px-4 rounded-xl border border-brand-border text-xs font-semibold hover:bg-brand-bg-subtle cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                  disabled={procureSubmitting || products.length === 0}
+                  className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60"
                 >
-                  Save Inventory Changes
+                  {procureSubmitting ? 'Recording…' : 'Record Procurement'}
                 </button>
               </div>
             </form>

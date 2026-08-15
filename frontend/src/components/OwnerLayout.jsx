@@ -1,45 +1,51 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import OwnerSidebar from './owner/OwnerSidebar'
 import OwnerHeader from './owner/OwnerHeader'
 import CompactStatusLine from './shared/CompactStatusLine'
 import NotificationsPopover from './shared/NotificationsPopover'
-import { INITIAL_ALERTS } from '../lib/newPages/mockData'
-import { getRuralMartById, getRuralMarts, getOwnerById, getOwners } from '../lib/newPages/shared/dataServices'
+import { getOwnerRuralMart } from '../lib/queries/ownerMart'
 
 export default function OwnerLayout() {
-  const { user, signOut } = useAuth()
+  const { user, profile, signOut } = useAuth()
   const navigate = useNavigate()
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [dateRange, setDateRange] = useState('Last 30 Days')
   const [lastSyncedTime, setLastSyncedTime] = useState('Not synced yet')
+  const [refreshKey, setRefreshKey] = useState(0)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [alerts, setAlerts] = useState(INITIAL_ALERTS)
+  const [ruralMart, setRuralMart] = useState(null)
 
-  const ownerEmail = user?.email ?? ''
+  const ruralMartId = profile?.rural_mart_id ?? null
 
-  const currentMart = useMemo(() => {
-    if (ownerEmail) {
-      const marts = getRuralMarts()
-      const matched = marts.find((m) => m.ownerEmail.toLowerCase() === ownerEmail.toLowerCase())
-      if (matched) return matched
+  useEffect(() => {
+    let isMounted = true
+    if (!ruralMartId) {
+      setRuralMart(null)
+      return
     }
-    return getRuralMartById('RM-001') || getRuralMarts()[0] || null
-  }, [ownerEmail])
+    getOwnerRuralMart(ruralMartId)
+      .then((mart) => {
+        if (isMounted) setRuralMart(mart)
+      })
+      .catch((err) => {
+        console.error('Failed to load Rural Mart record:', err.message)
+      })
+    return () => {
+      isMounted = false
+    }
+  }, [ruralMartId])
 
-  const currentOwner = useMemo(() => {
-    return currentMart ? getOwnerById(currentMart.ownerId) || getOwners()[0] || null : getOwners()[0] || null
-  }, [currentMart])
-
-  const displayMartName = currentMart?.ruralMartName || 'Your Rural Mart'
-  const displayOwnerName = currentOwner?.ownerName || currentMart?.ownerName || ownerEmail || 'Owner'
+  const displayMartName = ruralMart?.mart_name || 'Your Rural Mart'
+  const displayOwnerName = ruralMart?.entrepreneur_name || user?.email || 'Owner'
 
   const handleSync = () => {
     const now = new Date()
     setLastSyncedTime(now.toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))
+    setRefreshKey((k) => k + 1)
   }
 
   const handleLogout = async () => {
@@ -58,26 +64,21 @@ export default function OwnerLayout() {
             setSearchQuery={setSearchQuery}
             dateRange={dateRange}
             setDateRange={setDateRange}
-            unreadCount={alerts.filter((a) => a.status === 'New').length}
+            unreadCount={0}
             onOpenNotifications={() => setNotificationsOpen((v) => !v)}
             onLogout={handleLogout}
             ownerName={displayOwnerName}
-            ownerEmail={ownerEmail}
+            ownerEmail={user?.email ?? ''}
             martName={displayMartName}
           />
 
           <CompactStatusLine onSync={handleSync} lastSyncedTime={lastSyncedTime} />
         </div>
 
-        <NotificationsPopover
-          isOpen={notificationsOpen}
-          onClose={() => setNotificationsOpen(false)}
-          alerts={alerts}
-          onMarkAllRead={() => setAlerts((prev) => prev.map((a) => ({ ...a, status: 'Resolved' })))}
-        />
+        <NotificationsPopover isOpen={notificationsOpen} onClose={() => setNotificationsOpen(false)} alerts={[]} onMarkAllRead={() => {}} />
 
         <main className="flex-1 p-3 md:p-5 space-y-4 max-w-[1600px] w-full mx-auto">
-          <Outlet context={{ searchQuery, martName: displayMartName, ownerName: displayOwnerName }} />
+          <Outlet context={{ searchQuery, dateRange, martName: displayMartName, ownerName: displayOwnerName, ruralMartId, ruralMart, refreshKey }} />
         </main>
       </div>
     </div>

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import FarmersKpiCards from './FarmersKpiCards'
 import FarmerOutreachSummaryTable from './FarmerOutreachSummaryTable'
 import FarmerDatabasePreviewTable from './FarmerDatabasePreviewTable'
@@ -8,60 +9,74 @@ import OutreachPerformanceBarChart from './OutreachPerformanceBarChart'
 import FarmerDetailModal from './FarmerDetailModal'
 import FarmerPurchaseHistoryModal from './FarmerPurchaseHistoryModal'
 import MartOutreachDetailModal from './MartOutreachDetailModal'
-import { getFarmers, getRuralMarts, getFarmerOutreachMarts } from '../../../lib/newPages/shared/dataServices'
+import { getFarmersOutreachData } from '../../../lib/queries/farmersOutreach'
 
-export default function FarmersOutreachDashboard({ selectedDistrict, selectedMart }) {
+export default function FarmersOutreachDashboard({ selectedDistrict, selectedMart, dateRange, refreshKey }) {
   const [selectedMartModal, setSelectedMartModal] = useState(null)
   const [selectedFarmerModal, setSelectedFarmerModal] = useState(null)
   const [selectedPurchaseHistoryFarmer, setSelectedPurchaseHistoryFarmer] = useState(null)
   const [martTableSearch, setMartTableSearch] = useState('')
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const allFarmers = useMemo(() => {
-    const canonicalFarmers = getFarmers()
-    const canonicalMarts = getRuralMarts()
+  useEffect(() => {
+    let isMounted = true
 
-    return canonicalFarmers.map((cf) => {
-      const mart = canonicalMarts.find((m) => m.ruralMartId === cf.ruralMartId)
-      let martDisplayName = cf.ruralMartId || 'Rural Mart'
-      if (mart) {
-        martDisplayName = mart.ruralMartName.replace(' Rural Mart', '').replace(' Agro Mart', '').replace(' Farmers Hub', '')
+    async function loadFarmersOutreachData() {
+      setLoading(true)
+      setError('')
+      try {
+        const result = await getFarmersOutreachData({ dateRange })
+        if (isMounted) setData(result)
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load Farmers & Outreach data.')
+      } finally {
+        if (isMounted) setLoading(false)
       }
-      return {
-        id: cf.id,
-        name: cf.name,
-        village: cf.village,
-        district: cf.district || (mart ? mart.district : 'Erode'),
-        ruralMart: martDisplayName,
-        category: cf.category,
-        animalHeadCount: cf.animalHeadCount,
-        lastVisit: cf.lastVisit,
-        status: cf.status,
-        phone: cf.phone,
-        totalPurchasesVal: cf.totalPurchasesVal,
-        joinedDate: cf.joinedDate,
-        itemsPurchased: cf.itemsPurchased || 'None',
-        purchaseDate: cf.lastVisit,
-      }
-    })
-  }, [])
+    }
 
-  const allOutreachMarts = useMemo(() => getFarmerOutreachMarts(), [])
+    loadFarmersOutreachData()
+    return () => {
+      isMounted = false
+    }
+  }, [dateRange, refreshKey])
 
   const filteredOutreachMarts = useMemo(() => {
+    const allOutreachMarts = data?.outreachMarts ?? []
     return allOutreachMarts.filter((m) => {
       const matchDistrict = selectedDistrict === 'All Districts' || m.district.toLowerCase() === selectedDistrict.toLowerCase()
       const matchMart = selectedMart === 'All Rural Marts' || m.name.toLowerCase() === selectedMart.toLowerCase()
       return matchDistrict && matchMart
     })
-  }, [allOutreachMarts, selectedDistrict, selectedMart])
+  }, [data, selectedDistrict, selectedMart])
 
   const filteredFarmerRecords = useMemo(() => {
+    const allFarmers = data?.farmers ?? []
     return allFarmers.filter((f) => {
       const matchDistrict = selectedDistrict === 'All Districts' || f.district.toLowerCase() === selectedDistrict.toLowerCase()
       const matchMart = selectedMart === 'All Rural Marts' || f.ruralMart.toLowerCase() === selectedMart.toLowerCase()
       return matchDistrict && matchMart
     })
-  }, [allFarmers, selectedDistrict, selectedMart])
+  }, [data, selectedDistrict, selectedMart])
+
+  if (loading && !data) {
+    return (
+      <div className="flex items-center justify-center h-64 text-brand-text-muted gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        <span className="text-sm font-medium">Loading Farmers &amp; Outreach data…</span>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 rounded-xl bg-brand-danger-light border border-brand-danger-border text-brand-danger text-sm">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        <span>{error}</span>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-5">
@@ -83,13 +98,13 @@ export default function FarmersOutreachDashboard({ selectedDistrict, selectedMar
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2">
-          <FarmerGrowthAndRetentionChart />
+          <FarmerGrowthAndRetentionChart trendData={data.growthTrend} />
         </div>
-        <NewVsRepeatDonutChart />
+        <NewVsRepeatDonutChart donutData={data.newVsRepeatDonut} />
       </section>
 
       <section>
-        <OutreachPerformanceBarChart />
+        <OutreachPerformanceBarChart trendData={data.outreachTrend} />
       </section>
 
       <FarmerDetailModal farmer={selectedFarmerModal} onClose={() => setSelectedFarmerModal(null)} />

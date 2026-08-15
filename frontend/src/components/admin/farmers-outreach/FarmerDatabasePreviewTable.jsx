@@ -8,15 +8,7 @@ export default function FarmerDatabasePreviewTable({ farmers, onSelectFarmer, on
 
   const filteredFarmers = farmers.filter((f) => {
     const q = search.toLowerCase()
-    return (
-      f.id.toLowerCase().includes(q) ||
-      f.name.toLowerCase().includes(q) ||
-      f.village.toLowerCase().includes(q) ||
-      f.district.toLowerCase().includes(q) ||
-      f.ruralMart.toLowerCase().includes(q) ||
-      f.category.toLowerCase().includes(q) ||
-      (f.itemsPurchased && f.itemsPurchased.toLowerCase().includes(q))
-    )
+    return f.id.toLowerCase().includes(q) || f.name.toLowerCase().includes(q) || f.village.toLowerCase().includes(q) || f.district.toLowerCase().includes(q) || f.ruralMart.toLowerCase().includes(q)
   })
 
   const totalPages = Math.ceil(filteredFarmers.length / itemsPerPage) || 1
@@ -51,8 +43,8 @@ export default function FarmerDatabasePreviewTable({ farmers, onSelectFarmer, on
                 <th className="py-2.5 px-3">Name</th>
                 <th className="py-2.5 px-3">Village &amp; District</th>
                 <th className="py-2.5 px-3">Rural Mart</th>
-                <th className="py-2.5 px-3">Category</th>
                 <th className="py-2.5 px-3 text-center">Cattle Count</th>
+                <th className="py-2.5 px-3 text-center">Status</th>
                 <th className="py-2.5 px-3 text-center rounded-r-lg">Purchase History</th>
               </tr>
             </thead>
@@ -72,9 +64,6 @@ export default function FarmerDatabasePreviewTable({ farmers, onSelectFarmer, on
                       <div className="flex items-center gap-1.5">
                         <User className="w-3.5 h-3.5 text-brand-text-subtle group-hover:text-brand-primary" />
                         <span>{farmer.name}</span>
-                        {farmer.status === 'New' && (
-                          <span className="text-[9px] bg-brand-primary-light text-brand-primary-dark font-bold px-1.5 py-0.2 rounded border border-brand-primary/20">New</span>
-                        )}
                       </div>
                     </td>
 
@@ -86,9 +75,21 @@ export default function FarmerDatabasePreviewTable({ farmers, onSelectFarmer, on
                       <span className="inline-block font-semibold text-brand-text bg-brand-bg-subtle border border-brand-border px-2 py-0.5 rounded-md text-[11px]">{farmer.ruralMart}</span>
                     </td>
 
-                    <td className="py-3 px-3 text-brand-text-muted font-medium whitespace-nowrap">{farmer.category}</td>
+                    <td className="py-3 px-3 text-center whitespace-nowrap font-bold text-brand-primary">{farmer.cattleCount} Head</td>
 
-                    <td className="py-3 px-3 text-center whitespace-nowrap font-bold text-brand-primary">{farmer.animalHeadCount} Head</td>
+                    <td className="py-3 px-3 text-center whitespace-nowrap">
+                      <span
+                        className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                          farmer.status === 'Repeat'
+                            ? 'bg-brand-primary-light text-brand-primary-dark border-brand-primary/20'
+                            : farmer.status === 'New'
+                              ? 'bg-brand-info-light text-brand-info-dark border-brand-info-border'
+                              : 'bg-brand-bg-subtle text-brand-text-muted border-brand-border'
+                        }`}
+                      >
+                        {farmer.status}
+                      </span>
+                    </td>
 
                     <td className="py-3 px-3 text-center whitespace-nowrap">
                       <button

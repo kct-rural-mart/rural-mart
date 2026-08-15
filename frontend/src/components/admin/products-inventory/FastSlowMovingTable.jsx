@@ -1,11 +1,28 @@
-import { useState } from 'react'
-import { TrendingUp, TrendingDown, Zap, Clock, ArrowUpRight, ArrowDownRight } from 'lucide-react'
-import { FAST_SLOW_MOVING_PRODUCTS } from '../../../lib/newPages/mockData'
+import { useMemo, useState } from 'react'
+import { Zap, ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
-export default function FastSlowMovingTable() {
+const TOP_N = 8
+
+export default function FastSlowMovingTable({ products }) {
   const [activeTab, setActiveTab] = useState('All')
 
-  const filteredItems = FAST_SLOW_MOVING_PRODUCTS.filter((item) => activeTab === 'All' || item.velocity === activeTab)
+  const { fast, slow } = useMemo(() => {
+    const sold = [...products].filter((p) => p.soldQty > 0).sort((a, b) => b.soldQty - a.soldQty)
+    const fastList = sold.slice(0, TOP_N).map((p) => ({ ...p, velocity: 'Fast' }))
+
+    // "Slow moving" = products that still have stock but sold little or
+    // nothing in the period - out-of-stock items aren't "slow", they're
+    // just unavailable, so they're excluded from this ranking.
+    const slowList = [...products]
+      .filter((p) => p.stockQty > 0)
+      .sort((a, b) => a.soldQty - b.soldQty)
+      .slice(0, TOP_N)
+      .map((p) => ({ ...p, velocity: 'Slow' }))
+
+    return { fast: fastList, slow: slowList }
+  }, [products])
+
+  const filteredItems = activeTab === 'All' ? [...fast, ...slow] : activeTab === 'Fast' ? fast : slow
 
   return (
     <div className="bg-brand-surface border border-brand-border rounded-2xl p-4 shadow-xs hover:shadow-md hover:-translate-y-0.5 hover:border-brand-primary/40 transition-all duration-200 flex flex-col justify-between h-full">
@@ -21,9 +38,7 @@ export default function FastSlowMovingTable() {
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  activeTab === tab ? 'bg-brand-surface text-brand-text shadow-sm' : 'text-brand-text-muted hover:text-brand-text'
-                }`}
+                className={`px-2.5 py-1 rounded-lg transition-all ${activeTab === tab ? 'bg-brand-surface text-brand-text shadow-sm' : 'text-brand-text-muted hover:text-brand-text'}`}
               >
                 {tab === 'All' ? 'All' : tab === 'Fast' ? '⚡ Fast' : '🐢 Slow'}
               </button>
@@ -39,41 +54,31 @@ export default function FastSlowMovingTable() {
               const isFast = item.velocity === 'Fast'
 
               return (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between p-2.5 rounded-xl border border-brand-border bg-brand-bg-subtle/50 hover:border-brand-primary/40 transition-all group"
-                >
+                <div key={`${item.velocity}-${item.id}`} className="flex items-center justify-between p-2.5 rounded-xl border border-brand-border bg-brand-bg-subtle/50 hover:border-brand-primary/40 transition-all group">
                   <div className="flex items-center gap-3 min-w-0">
-                    <span
-                      className={`w-6 h-6 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0 ${
-                        isFast ? 'bg-brand-primary-light text-brand-primary-dark' : 'bg-brand-danger-light text-brand-danger'
-                      }`}
-                    >
+                    <span className={`w-6 h-6 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0 ${isFast ? 'bg-brand-primary-light text-brand-primary-dark' : 'bg-brand-danger-light text-brand-danger'}`}>
                       #{idx + 1}
                     </span>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold text-xs text-brand-text truncate group-hover:text-brand-primary">{item.name}</span>
-                        <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${isFast ? 'bg-brand-primary-light text-brand-primary-dark' : 'bg-brand-warning-light text-brand-warning-dark'}`}>
-                          {item.velocity}
-                        </span>
+                        <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${isFast ? 'bg-brand-primary-light text-brand-primary-dark' : 'bg-brand-warning-light text-brand-warning-dark'}`}>{item.velocity}</span>
                       </div>
                       <div className="flex items-center gap-3 text-[10px] text-brand-text-subtle mt-0.5">
                         <span>{item.category}</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-2.5 h-2.5" />
-                          Turnover: <strong className="text-brand-text-muted">{item.turnoverDays}d</strong>
-                        </span>
+                        <span>{item.ruralMart}</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="text-right shrink-0">
-                    <div className="font-mono font-bold text-xs text-brand-text">{item.salesQty.toLocaleString('en-IN')} units</div>
-                    <div className={`flex items-center justify-end gap-0.5 text-[10px] font-bold ${item.trend === 'up' ? 'text-brand-primary' : 'text-brand-danger'}`}>
-                      {item.trend === 'up' ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                      <span>{item.trendPercent > 0 ? `+${item.trendPercent}%` : `${item.trendPercent}%`}</span>
+                    <div className="font-mono font-bold text-xs text-brand-text">
+                      {item.soldQty.toLocaleString('en-IN')} {item.unit}
+                    </div>
+                    <div className={`flex items-center justify-end gap-0.5 text-[10px] font-bold ${isFast ? 'text-brand-primary' : 'text-brand-warning-dark'}`}>
+                      {isFast ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                      <span>{item.stockQty.toLocaleString('en-IN')} in stock</span>
                     </div>
                   </div>
                 </div>
@@ -81,17 +86,6 @@ export default function FastSlowMovingTable() {
             })}
           </div>
         )}
-      </div>
-
-      <div className="pt-3 mt-3 border-t border-brand-border text-[11px] text-brand-text-muted flex items-center justify-between">
-        <span className="flex items-center gap-1 font-semibold text-brand-primary">
-          <TrendingUp className="w-3.5 h-3.5 text-brand-primary" />
-          Fast threshold: &lt; 15 turnover days
-        </span>
-        <span className="flex items-center gap-1 font-semibold text-brand-danger">
-          <TrendingDown className="w-3.5 h-3.5 text-brand-danger" />
-          Slow threshold: &gt; 40 turnover days
-        </span>
       </div>
     </div>
   )

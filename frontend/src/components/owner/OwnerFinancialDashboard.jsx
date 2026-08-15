@@ -1,22 +1,21 @@
-import { useMemo, useState } from 'react'
-import { Trash2, Edit2, X, Download, BookOpen, ArrowUpRight, Calculator, CheckCircle2, TrendingUp } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useOutletContext } from 'react-router-dom'
+import { X, Plus, CheckCircle2, AlertCircle, Loader2, TrendingUp } from 'lucide-react'
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { getChartTheme } from '../../lib/newPages/chartColors'
-import { getFinancialLedgerLogs, saveFinancialLedgerLogs } from '../../lib/newPages/shared/dataServices'
-import { getStoredSession } from '../../lib/newPages/storageService'
+import { getFinanceDashboardData, formatLakhsCr } from '../../lib/queries/finance'
+import { addExpense, EXPENSE_CATEGORIES } from '../../lib/queries/ownerExpenses'
+import { getLocalToday } from '../../utils/date'
 
 function CustomTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
-    const rev = payload.find((p) => p.dataKey === 'revenue')?.value || 0
+    const rev = payload.find((p) => p.dataKey === 'sales')?.value || 0
     const gp = payload.find((p) => p.dataKey === 'grossProfit')?.value || 0
-    const margin = rev > 0 ? ((gp / rev) * 100).toFixed(1) : '0.0'
-
     return (
       <div className="p-3 rounded-xl bg-brand-surface border border-brand-border shadow-lg text-xs space-y-1">
         <p className="font-bold text-brand-text">{label}</p>
-        <div className="text-brand-success font-semibold">Revenue: ₹{rev.toLocaleString('en-IN')}</div>
-        <div className="text-brand-accent font-semibold">Gross Profit: ₹{gp.toLocaleString('en-IN')}</div>
-        <div className="text-brand-warning font-bold pt-1 border-t border-brand-border/60">Margin Rate: {margin}%</div>
+        <div className="text-brand-success font-semibold">Revenue: ₹{rev.toLocaleString('en-IN')} L</div>
+        <div className="text-brand-accent font-semibold">Gross Profit: ₹{gp.toLocaleString('en-IN')} L</div>
       </div>
     )
   }
@@ -24,158 +23,105 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 export default function OwnerFinancialDashboard() {
+  const { ruralMartId, dateRange, refreshKey: layoutRefreshKey } = useOutletContext()
   const chartTheme = getChartTheme()
 
-  const session = getStoredSession()
-  const ruralMartId = session?.ruralMartId || session?.email || 'RM-001'
+  const [mart, setMart] = useState(null)
+  const [trendData, setTrendData] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [localRefresh, setLocalRefresh] = useState(0)
 
-  const [ledgerLogs, setLedgerLogs] = useState(() => getFinancialLedgerLogs(ruralMartId))
+  useEffect(() => {
+    let isMounted = true
 
-  const totalRevenue = useMemo(() => ledgerLogs.reduce((acc, log) => acc + log.grossRevenue, 0), [ledgerLogs])
-  const totalNetProfit = useMemo(() => ledgerLogs.reduce((acc, log) => acc + log.netProfit, 0), [ledgerLogs])
-  const totalProcurement = useMemo(() => ledgerLogs.reduce((acc, log) => acc + log.procurementCosts, 0), [ledgerLogs])
-  const totalExpenses = useMemo(() => ledgerLogs.reduce((acc, log) => acc + log.operatingExpenses, 0), [ledgerLogs])
-  const netMarginPct = totalRevenue > 0 ? ((totalNetProfit / totalRevenue) * 100).toFixed(1) : '0.0'
-  const cogsRatioPct = totalRevenue > 0 ? ((totalProcurement / totalRevenue) * 100).toFixed(1) : '0.0'
+    async function load() {
+      setLoading(true)
+      setError('')
+      try {
+        const result = await getFinanceDashboardData({ dateRange })
+        if (isMounted) {
+          setMart(result.financialMarts.find((m) => m.id === ruralMartId) ?? null)
+          setTrendData(result.trendData)
+        }
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load financial data.')
+      } finally {
+        if (isMounted) setLoading(false)
+      }
+    }
 
-  const chartData = useMemo(() => {
-    return ledgerLogs
-      .map((log) => ({
-        date: log.dateStr.split(' ')[0] + ' ' + (log.dateStr.split(' ')[1] || ''),
-        revenue: log.grossRevenue,
-        grossProfit: log.grossRevenue - log.procurementCosts,
-      }))
-      .reverse()
-  }, [ledgerLogs])
-
-  const peakRevenue = useMemo(() => {
-    if (chartData.length === 0) return 0
-    return Math.max(...chartData.map((d) => d.revenue))
-  }, [chartData])
-
-  const recentEntries = useMemo(() => {
-    return ledgerLogs.slice(0, 3).map((log) => ({ date: log.dateStr, revenue: log.grossRevenue, profit: log.netProfit }))
-  }, [ledgerLogs])
-
-  const updateLedgerLogs = (newLogs) => {
-    setLedgerLogs(newLogs)
-    saveFinancialLedgerLogs('RM-001', newLogs)
-  }
-
-  const [isLogsPanelOpen, setIsLogsPanelOpen] = useState(false)
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [editingLog, setEditingLog] = useState(null)
+    if (ruralMartId) load()
+    return () => {
+      isMounted = false
+    }
+  }, [ruralMartId, dateRange, layoutRefreshKey, localRefresh])
 
   const [toastMessage, setToastMessage] = useState(null)
-
-  const [operationType, setOperationType] = useState('Retail Sales & Procurement')
-  const [grossRevenueInput, setGrossRevenueInput] = useState('0')
-  const [procurementCostsInput, setProcurementCostsInput] = useState('0')
-  const [operatingExpensesInput, setOperatingExpensesInput] = useState('0')
-
-  const revVal = Number(grossRevenueInput) || 0
-  const procVal = Number(procurementCostsInput) || 0
-  const opexVal = Number(operatingExpensesInput) || 0
-
-  const liveGrossProfit = revVal - procVal
-  const liveNetProfit = revVal - procVal - opexVal
-
-  const [editAuditDate, setEditAuditDate] = useState('2026-08-06')
-  const [editOperationType, setEditOperationType] = useState('Retail Sales & Procurement')
-  const [editGrossRev, setEditGrossRev] = useState('0')
-  const [editProcurement, setEditProcurement] = useState('0')
-  const [editOpEx, setEditOpEx] = useState('0')
-
-  const editRevVal = Number(editGrossRev) || 0
-  const editProcVal = Number(editProcurement) || 0
-  const editOpExVal = Number(editOpEx) || 0
-
-  const editComputedGrossProfit = editRevVal - editProcVal
-  const editComputedNetProfit = editRevVal - editProcVal - editOpExVal
-
   const showToast = (msg) => {
     setToastMessage(msg)
     setTimeout(() => setToastMessage(null), 4000)
   }
 
-  const handleClearForm = () => {
-    setOperationType('Retail Sales & Procurement')
-    setGrossRevenueInput('0')
-    setProcurementCostsInput('0')
-    setOperatingExpensesInput('0')
+  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
+  const [expenseCategory, setExpenseCategory] = useState(EXPENSE_CATEGORIES[0])
+  const [expenseAmount, setExpenseAmount] = useState('')
+  const [expenseDescription, setExpenseDescription] = useState('')
+  const [expenseDate, setExpenseDate] = useState(getLocalToday())
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false)
+  const [expenseError, setExpenseError] = useState('')
+
+  const resetExpenseForm = () => {
+    setExpenseCategory(EXPENSE_CATEGORIES[0])
+    setExpenseAmount('')
+    setExpenseDescription('')
+    setExpenseDate(getLocalToday())
+    setExpenseError('')
   }
 
-  const handleSaveFinancialLog = (e) => {
+  const handleAddExpenseSubmit = async (e) => {
     e.preventDefault()
-
-    const newLog = {
-      id: `fin-${Date.now()}`,
-      voucherCode: `FIN-0${ledgerLogs.length + 1}`,
-      dateStr: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-      rawDate: new Date().toISOString().split('T')[0],
-      status: 'Saved',
-      operationType: operationType.trim() || 'General Operation',
-      grossRevenue: revVal,
-      procurementCosts: procVal,
-      operatingExpenses: opexVal,
-      netProfit: liveNetProfit,
+    if (!expenseAmount) return
+    setExpenseSubmitting(true)
+    setExpenseError('')
+    try {
+      await addExpense({
+        ruralMartId,
+        category: expenseCategory,
+        amount: Number(expenseAmount),
+        description: expenseDescription.trim(),
+        expenseDate,
+      })
+      setIsAddExpenseOpen(false)
+      resetExpenseForm()
+      setLocalRefresh((k) => k + 1)
+      showToast('Expense recorded successfully.')
+    } catch (err) {
+      setExpenseError(err.message || 'Failed to record expense.')
+    } finally {
+      setExpenseSubmitting(false)
     }
-
-    updateLedgerLogs([newLog, ...ledgerLogs])
-    showToast('Financial log saved successfully!')
-    handleClearForm()
   }
 
-  const handleOpenEdit = (log) => {
-    setEditingLog(log)
-    setEditAuditDate(log.rawDate || '2026-08-06')
-    setEditOperationType(log.operationType)
-    setEditGrossRev(String(log.grossRevenue))
-    setEditProcurement(String(log.procurementCosts))
-    setEditOpEx(String(log.operatingExpenses))
-    setIsEditModalOpen(true)
-  }
-
-  const handleDeleteLog = (id) => {
-    updateLedgerLogs(ledgerLogs.filter((item) => item.id !== id))
-    setIsEditModalOpen(false)
-    setEditingLog(null)
-    showToast('Ledger entry deleted successfully.')
-  }
-
-  const handleSaveVoucherChanges = (e) => {
-    e.preventDefault()
-    if (!editingLog) return
-
-    const updatedNetProfit = editRevVal - editProcVal - editOpExVal
-
-    const parsedDate = new Date(editAuditDate)
-    const dateFormatted = isNaN(parsedDate.getTime())
-      ? editingLog.dateStr
-      : `${parsedDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} (${parsedDate.toLocaleDateString('en-US', { weekday: 'short' })})`
-
-    updateLedgerLogs(
-      ledgerLogs.map((log) =>
-        log.id === editingLog.id
-          ? {
-              ...log,
-              rawDate: editAuditDate,
-              dateStr: dateFormatted,
-              status: 'Edited',
-              operationType: editOperationType.trim() || log.operationType,
-              grossRevenue: editRevVal,
-              procurementCosts: editProcVal,
-              operatingExpenses: editOpExVal,
-              netProfit: updatedNetProfit,
-            }
-          : log
-      )
+  if (loading && !mart) {
+    return (
+      <div className="flex items-center justify-center h-64 text-brand-text-muted gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        <span className="text-sm font-medium">Loading financial data…</span>
+      </div>
     )
-
-    setIsEditModalOpen(false)
-    setEditingLog(null)
-    showToast(`Voucher ${editingLog.voucherCode} updated successfully!`)
   }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 rounded-xl bg-brand-danger-light border border-brand-danger-border text-brand-danger text-sm">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        <span>{error}</span>
+      </div>
+    )
+  }
+
+  const expenseCategories = Object.entries(mart?.expenseBreakdown || {}).sort((a, b) => b[1] - a[1])
 
   return (
     <div className="space-y-4">
@@ -193,171 +139,58 @@ export default function OwnerFinancialDashboard() {
 
       <div className="bg-brand-surface border border-brand-border rounded-xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-brand-text">Financial Audit &amp; Accounting Dashboard</h1>
-          <p className="text-xs text-brand-text-muted mt-0.5">Calculate gross margins, operational overheads, and edit daily ledger logs.</p>
+          <h1 className="text-xl font-bold text-brand-text">Financial Dashboard</h1>
+          <p className="text-xs text-brand-text-muted mt-0.5">Revenue, procurement, and profit for your Rural Mart, calculated from real transactions.</p>
         </div>
 
         <button
-          onClick={() => setIsLogsPanelOpen(true)}
+          onClick={() => setIsAddExpenseOpen(true)}
           className="h-9 px-4 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer shrink-0 self-start sm:self-auto"
         >
-          <BookOpen className="w-4 h-4" />
-          <span>Historical Audit Ledger Logs ({ledgerLogs.length})</span>
+          <Plus className="w-4 h-4" />
+          <span>Add Expense</span>
         </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="card-enterprise p-4 space-y-1">
-          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">TOTAL GROSS REVENUE</span>
-          <div className="text-2xl font-extrabold text-brand-text">₹{totalRevenue.toLocaleString('en-IN')}</div>
-          <span className="text-[11px] font-semibold text-brand-success flex items-center gap-0.5">
-            <ArrowUpRight className="w-3.5 h-3.5" /> 0% YoY growth
-          </span>
+          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">REVENUE</span>
+          <div className="text-2xl font-extrabold text-brand-text">{formatLakhsCr(mart?.salesRaw ?? 0)}</div>
         </div>
 
         <div className="card-enterprise p-4 space-y-1">
-          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">NET OPERATING PROFIT</span>
-          <div className="text-2xl font-extrabold text-brand-primary">₹{totalNetProfit.toLocaleString('en-IN')}</div>
-          <span className="text-[11px] font-semibold text-brand-success flex items-center gap-0.5">{netMarginPct}% Net Margin</span>
+          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">PROCUREMENT</span>
+          <div className="text-2xl font-extrabold text-brand-text">{formatLakhsCr(mart?.procurementRaw ?? 0)}</div>
         </div>
 
         <div className="card-enterprise p-4 space-y-1">
-          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">TOTAL PROCUREMENT COSTS</span>
-          <div className="text-2xl font-extrabold text-brand-text">₹{totalProcurement.toLocaleString('en-IN')}</div>
-          <span className="text-[11px] font-medium text-brand-text-muted">{cogsRatioPct}% COGS ratio</span>
+          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">GROSS PROFIT</span>
+          <div className="text-2xl font-extrabold text-brand-accent">{formatLakhsCr(mart?.grossProfitRaw ?? 0)}</div>
         </div>
 
         <div className="card-enterprise p-4 space-y-1">
-          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">OVERHEAD &amp; EXPENSES</span>
-          <div className="text-2xl font-extrabold text-brand-warning">₹{totalExpenses.toLocaleString('en-IN')}</div>
-          <span className="text-[11px] font-medium text-brand-text-muted">Rent, utilities &amp; logistics</span>
+          <span className="text-[10px] font-bold text-brand-text-muted uppercase tracking-wider block">NET PROFIT</span>
+          <div className="text-2xl font-extrabold text-brand-primary">{formatLakhsCr(mart?.netProfitRaw ?? 0)}</div>
+          <span className="text-[11px] font-semibold text-brand-text-muted">{mart?.profitMargin ?? 0}% margin</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        <div className="lg:col-span-5 card-enterprise p-4 sm:p-5 space-y-4">
-          <div className="border-b border-brand-border/60 pb-3">
-            <div className="flex items-center gap-2">
-              <Calculator className="w-4 h-4 text-brand-primary" />
-              <h2 className="text-sm font-bold text-brand-text uppercase tracking-wider">Financial Entry &amp; Real-time Calculation</h2>
-            </div>
-            <p className="text-xs text-brand-text-muted mt-0.5">Enter daily operational values to compute margins live.</p>
-          </div>
-
-          <form onSubmit={handleSaveFinancialLog} className="space-y-3">
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-brand-text">
-                Type of Operation <span className="text-brand-danger">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Retail Sales & Procurement, Bulk Wholesaling..."
-                value={operationType}
-                onChange={(e) => setOperationType(e.target.value)}
-                className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-brand-text">
-                Gross Revenue (₹) <span className="text-brand-danger">*</span>
-              </label>
-              <input
-                type="number"
-                required
-                value={grossRevenueInput}
-                onChange={(e) => setGrossRevenueInput(e.target.value)}
-                className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-brand-text">
-                Procurement Costs (₹) <span className="text-brand-danger">*</span>
-              </label>
-              <input
-                type="number"
-                required
-                value={procurementCostsInput}
-                onChange={(e) => setProcurementCostsInput(e.target.value)}
-                className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-brand-text">
-                Operating Expenses (₹) <span className="text-brand-danger">*</span>
-              </label>
-              <input
-                type="number"
-                required
-                value={operatingExpensesInput}
-                onChange={(e) => setOperatingExpensesInput(e.target.value)}
-                className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border text-center space-y-0.5">
-                <span className="text-[10px] font-bold text-brand-text-muted uppercase block">GROSS PROFIT</span>
-                <span className="text-base font-extrabold text-brand-text">₹{liveGrossProfit.toLocaleString('en-IN')}</span>
-              </div>
-
-              <div className="p-3 rounded-xl bg-brand-primary-light border border-brand-primary/20 text-center space-y-0.5">
-                <span className="text-[10px] font-bold text-brand-primary uppercase block">NET PROFIT</span>
-                <span className="text-base font-extrabold text-brand-primary">₹{liveNetProfit.toLocaleString('en-IN')}</span>
-              </div>
-            </div>
-
-            <div className="pt-3 flex items-center justify-between border-t border-brand-border/60">
-              <button
-                type="button"
-                onClick={handleClearForm}
-                className="h-9 px-4 rounded-xl border border-brand-border text-xs font-semibold text-brand-text-muted hover:bg-brand-bg-subtle cursor-pointer transition-colors"
-              >
-                Clear Form
-              </button>
-
-              <button
-                type="submit"
-                className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-              >
-                Save Financial Log
-              </button>
-            </div>
-          </form>
-        </div>
-
         <div className="lg:col-span-7 card-enterprise p-4 sm:p-5 space-y-4">
           <div className="border-b border-brand-border/60 pb-3">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-brand-primary" />
-              <h2 className="text-sm font-bold text-brand-text uppercase tracking-wider">7-DAY REVENUE VS GROSS PROFIT</h2>
+              <h2 className="text-sm font-bold text-brand-text uppercase tracking-wider">Sales vs Gross Profit Trend</h2>
             </div>
-            <p className="text-xs text-brand-text-muted mt-0.5">Daily margin divergence over current billing cycle</p>
+            <p className="text-xs text-brand-text-muted mt-0.5">Last 8 months, your Rural Mart only</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border">
-              <span className="text-[10px] font-bold text-brand-text-muted uppercase block">7-DAY PEAK REVENUE</span>
-              <span className="text-lg font-extrabold text-brand-text">₹{peakRevenue.toLocaleString('en-IN')}</span>
-            </div>
-
-            <div className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border">
-              <span className="text-[10px] font-bold text-brand-text-muted uppercase block">AVERAGE MARGIN RATE</span>
-              <span className="text-lg font-extrabold text-brand-success">{netMarginPct}%</span>
-            </div>
-          </div>
-
-          <div className="h-56 w-full pt-2">
-            {chartData.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-xs text-brand-text-muted italic">
-                No financial transaction data recorded yet.
-              </div>
+          <div className="h-64 w-full">
+            {trendData.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-xs text-brand-text-muted italic">No financial trend data available.</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData}>
+                <AreaChart data={trendData}>
                   <defs>
                     <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#174F3A" stopOpacity={0.4} />
@@ -369,269 +202,139 @@ export default function OwnerFinancialDashboard() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridStroke} />
-                  <XAxis dataKey="date" stroke={chartTheme.textColor} fontSize={11} />
-                  <YAxis stroke={chartTheme.textColor} fontSize={11} tickFormatter={(val) => `₹${val / 1000}k`} />
+                  <XAxis dataKey="period" stroke={chartTheme.textColor} fontSize={11} />
+                  <YAxis stroke={chartTheme.textColor} fontSize={11} tickFormatter={(v) => `₹${v}L`} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="revenue" name="Revenue" stroke="#174F3A" fillOpacity={1} fill="url(#colorRev)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="sales" name="Sales" stroke="#174F3A" fillOpacity={1} fill="url(#colorRev)" strokeWidth={2} />
                   <Area type="monotone" dataKey="grossProfit" name="Gross Profit" stroke="#0D9488" fillOpacity={1} fill="url(#colorGp)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             )}
           </div>
+        </div>
 
-          <div className="flex items-center justify-center gap-6 text-xs border-t border-brand-border/60 pt-2">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-brand-primary" />
-              <span className="font-semibold text-brand-text">Revenue</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-brand-accent" />
-              <span className="font-semibold text-brand-text">Gross Profit</span>
-            </div>
+        <div className="lg:col-span-5 card-enterprise p-4 sm:p-5 space-y-3">
+          <div className="border-b border-brand-border/60 pb-2.5">
+            <h2 className="text-sm font-bold text-brand-text uppercase tracking-wider">Operating Expenses</h2>
+            <p className="text-[11px] text-brand-text-muted">By category, for the selected period</p>
           </div>
 
-          <div className="pt-2 space-y-2 border-t border-brand-border/60">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-brand-text uppercase tracking-wider">RECENT LOGGED ENTRIES</h3>
-              <span className="text-[11px] font-medium text-brand-text-muted">{recentEntries.length} entries tracked</span>
-            </div>
+          <div className="space-y-2">
+            {expenseCategories.length === 0 ? (
+              <p className="text-xs text-brand-text-muted italic text-center py-6">No expenses recorded for this period.</p>
+            ) : (
+              expenseCategories.map(([category, amount]) => (
+                <div key={category} className="flex items-center justify-between p-2.5 rounded-xl bg-brand-bg-subtle border border-brand-border text-xs">
+                  <span className="font-semibold text-brand-text">{category}</span>
+                  <span className="font-bold text-brand-text">₹{amount.toLocaleString('en-IN')}</span>
+                </div>
+              ))
+            )}
+          </div>
 
-            <div className="space-y-1.5">
-              {recentEntries.length === 0 ? (
-                <p className="text-xs text-brand-text-muted italic text-center py-3">No recent ledger entries recorded.</p>
-              ) : (
-                recentEntries.map((entry, idx) => (
-                  <div key={idx} className="p-2.5 rounded-xl bg-brand-bg-subtle border border-brand-border flex items-center justify-between text-xs">
-                    <span className="font-bold text-brand-text">{entry.date}</span>
-                    <div className="flex items-center gap-3">
-                      <span className="text-brand-text-muted">
-                        Rev: <strong className="text-brand-text">₹{entry.revenue.toLocaleString('en-IN')}</strong>
-                      </span>
-                      <span className="text-brand-success font-bold">Profit: ₹{entry.profit.toLocaleString('en-IN')}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
+          <div className="pt-2 border-t border-brand-border/60 flex items-center justify-between text-xs">
+            <span className="font-bold text-brand-text">Total Operating Expenses</span>
+            <span className="font-extrabold text-brand-warning">₹{(mart?.operatingExpensesRaw ?? 0).toLocaleString('en-IN')}</span>
           </div>
         </div>
       </div>
 
-      {isLogsPanelOpen && (
-        <div className="fixed inset-0 z-50 bg-brand-text/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-brand-surface border border-brand-border rounded-2xl shadow-xl max-w-2xl w-full p-6 space-y-4 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between border-b border-brand-border/60 pb-3 shrink-0">
-              <div>
-                <h3 className="text-base font-bold text-brand-text flex items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-brand-primary" />
-                  <span>Financial Audit Ledger Logs</span>
-                </h3>
-                <p className="text-xs text-brand-text-muted">Historical daily audit &amp; operation records</p>
-              </div>
-              <button onClick={() => setIsLogsPanelOpen(false)} className="text-brand-text-subtle hover:text-brand-text p-1 cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto space-y-3 flex-1 pr-1">
-              {ledgerLogs.map((log) => (
-                <div key={log.id} className="p-4 rounded-xl bg-brand-bg-subtle border border-brand-border space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-brand-text">{log.dateStr}</span>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                          log.status === 'Edited' ? 'bg-brand-warning-light text-brand-warning-dark' : 'bg-brand-success-light text-brand-success'
-                        }`}
-                      >
-                        {log.status}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold text-brand-success">Net: ₹{log.netProfit.toLocaleString('en-IN')}</span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOpenEdit(log)}
-                          className="h-7 px-2.5 rounded-lg border border-brand-border bg-brand-surface hover:bg-brand-primary-light text-brand-primary text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteLog(log.id)}
-                          className="h-7 w-7 rounded-lg border border-brand-border bg-brand-surface hover:bg-brand-danger-light text-brand-danger inline-flex items-center justify-center cursor-pointer"
-                          title="Delete Log"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className="px-2 py-0.5 rounded-md bg-brand-primary-light text-brand-primary text-[10px] font-semibold">{log.operationType}</span>
-                  </div>
-
-                  <div className="p-2.5 rounded-lg bg-brand-surface border border-brand-border text-xs grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div>
-                      <span className="text-[10px] text-brand-text-muted block">Revenue</span>
-                      <strong className="text-brand-text">₹{log.grossRevenue.toLocaleString('en-IN')}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-brand-text-muted block">Procurement</span>
-                      <strong className="text-brand-text">₹{log.procurementCosts.toLocaleString('en-IN')}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-brand-text-muted block">Expenses</span>
-                      <strong className="text-brand-warning">₹{log.operatingExpenses.toLocaleString('en-IN')}</strong>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {ledgerLogs.length === 0 && <div className="py-8 text-center text-xs text-brand-text-muted">No audit ledger logs found.</div>}
-            </div>
-
-            <div className="pt-3 border-t border-brand-border/60 flex items-center justify-between shrink-0">
-              <span className="text-xs text-brand-text-muted font-medium">Total {ledgerLogs.length} records</span>
-
-              <button
-                onClick={() => showToast('Exporting Financial Ledger PDF...')}
-                className="h-9 px-4 rounded-xl bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Export Ledger PDF</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isEditModalOpen && editingLog && (
+      {isAddExpenseOpen && (
         <div className="fixed inset-0 z-50 bg-brand-text/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-brand-surface border border-brand-border rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-brand-border/60 pb-3">
               <div>
                 <h3 className="text-base font-bold text-brand-text flex items-center gap-2">
-                  <Edit2 className="w-4 h-4 text-brand-primary" />
-                  <span>Edit Financial Audit Voucher ({editingLog.voucherCode})</span>
+                  <Plus className="w-4 h-4 text-brand-primary" />
+                  <span>Add Expense</span>
                 </h3>
-                <p className="text-[11px] text-brand-text-muted">Modify financial values, operation types, and recalculate margins.</p>
+                <p className="text-[11px] text-brand-text-muted">Log an operating expense for your Rural Mart.</p>
               </div>
-              <button onClick={() => setIsEditModalOpen(false)} className="text-brand-text-subtle hover:text-brand-text p-1 cursor-pointer">
+              <button
+                onClick={() => {
+                  setIsAddExpenseOpen(false)
+                  resetExpenseForm()
+                }}
+                className="text-brand-text-subtle hover:text-brand-text cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveVoucherChanges} className="space-y-3">
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-brand-text">
-                  Audit Date <span className="text-brand-danger">*</span>
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={editAuditDate}
-                  onChange={(e) => setEditAuditDate(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-brand-text">
-                    Type of Operation <span className="text-brand-danger">*</span>
-                  </label>
+            <form onSubmit={handleAddExpenseSubmit} className="space-y-3">
+              {expenseError && (
+                <div className="p-2.5 rounded-lg bg-brand-danger-light border border-brand-danger-border text-brand-danger text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{expenseError}</span>
                 </div>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Retail Sales & Procurement"
-                  value={editOperationType}
-                  onChange={(e) => setEditOperationType(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                />
+              )}
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-brand-text">
+                  Category <span className="text-brand-danger">*</span>
+                </label>
+                <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value)} className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text">
+                  {EXPENSE_CATEGORIES.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-brand-text">
-                  Gross Revenue (₹) <span className="text-brand-danger">*</span>
+                  Amount (₹) <span className="text-brand-danger">*</span>
                 </label>
                 <input
                   type="number"
                   required
-                  value={editGrossRev}
-                  onChange={(e) => setEditGrossRev(e.target.value)}
+                  min="0.01"
+                  step="0.01"
+                  value={expenseAmount}
+                  onChange={(e) => setExpenseAmount(e.target.value)}
                   className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-brand-text">
-                    Procurement Costs (₹) <span className="text-brand-danger">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={editProcurement}
-                    onChange={(e) => setEditProcurement(e.target.value)}
-                    className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-brand-text">
-                    Operating Expenses (₹) <span className="text-brand-danger">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={editOpEx}
-                    onChange={(e) => setEditOpEx(e.target.value)}
-                    className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-brand-text">Description</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Monthly electricity bill"
+                  value={expenseDescription}
+                  onChange={(e) => setExpenseDescription(e.target.value)}
+                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <div className="p-2.5 rounded-xl bg-brand-bg-subtle border border-brand-border text-center">
-                  <span className="text-[10px] font-bold text-brand-text-muted uppercase block">GROSS PROFIT</span>
-                  <span className="text-sm font-extrabold text-brand-text">₹{editComputedGrossProfit.toLocaleString('en-IN')}</span>
-                </div>
-
-                <div className="p-2.5 rounded-xl bg-brand-primary-light border border-brand-primary/20 text-center">
-                  <span className="text-[10px] font-bold text-brand-primary uppercase block">NET PROFIT</span>
-                  <span className="text-sm font-extrabold text-brand-primary">₹{editComputedNetProfit.toLocaleString('en-IN')}</span>
-                </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-brand-text">
+                  Expense Date <span className="text-brand-danger">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={expenseDate}
+                  onChange={(e) => setExpenseDate(e.target.value)}
+                  className="w-full h-9 px-3 text-xs rounded-xl border border-brand-border bg-brand-bg-subtle text-brand-text"
+                />
               </div>
 
-              <div className="pt-3 flex items-center justify-between border-t border-brand-border/60">
+              <div className="pt-3 flex justify-end gap-2 border-t border-brand-border/60">
                 <button
                   type="button"
-                  onClick={() => handleDeleteLog(editingLog.id)}
-                  className="h-9 px-3 rounded-xl border border-brand-danger-border text-brand-danger text-xs font-bold hover:bg-brand-danger-light cursor-pointer transition-colors flex items-center gap-1"
+                  onClick={() => {
+                    setIsAddExpenseOpen(false)
+                    resetExpenseForm()
+                  }}
+                  className="h-9 px-4 rounded-xl border border-brand-border text-xs font-semibold hover:bg-brand-bg-subtle cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete Log</span>
+                  Cancel
                 </button>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsEditModalOpen(false)}
-                    className="h-9 px-4 rounded-xl border border-brand-border text-xs font-semibold hover:bg-brand-bg-subtle cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="h-9 px-4 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
-                  >
-                    Save Voucher Changes
-                  </button>
-                </div>
+                <button type="submit" disabled={expenseSubmitting} className="h-9 px-5 bg-brand-primary hover:bg-brand-primary-dark text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60">
+                  {expenseSubmitting ? 'Saving…' : 'Save Expense'}
+                </button>
               </div>
             </form>
           </div>

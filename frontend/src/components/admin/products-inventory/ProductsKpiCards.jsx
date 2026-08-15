@@ -1,23 +1,24 @@
 import { useState } from 'react'
-import { IndianRupee, PackageCheck, AlertTriangle, XCircle, Truck, ShoppingBag, Info } from 'lucide-react'
+import { IndianRupee, PackageCheck, XCircle, Truck, ShoppingBag, Info } from 'lucide-react'
+import { formatLakhsCr } from '../../../lib/queries/finance'
 
 export default function ProductsKpiCards({ products }) {
   const [activeTooltip, setActiveTooltip] = useState(null)
 
-  const totalVal = products.reduce((acc, p) => acc + (p.inventoryValue || 0), 0)
+  const totalVal = products.reduce((acc, p) => acc + p.inventoryValue, 0)
   const totalSKUs = products.length
-  const lowStockCount = products.filter((p) => p.status === 'Low Stock').length
   const outOfStockCount = products.filter((p) => p.status === 'Out of Stock').length
-  const procurementTotal = products.reduce((acc, p) => acc + (p.procurementQty || 0), 0)
-  const salesTotal = products.reduce((acc, p) => acc + (p.salesQty || 0), 0)
+  const procurementQtyTotal = products.reduce((acc, p) => acc + p.procuredQty, 0)
+  const procurementValueTotal = products.reduce((acc, p) => acc + p.procuredValue, 0)
+  const salesTotal = products.reduce((acc, p) => acc + p.soldQty, 0)
 
   const kpis = [
-    { id: 'inv-value', label: 'Inventory Value', value: `₹${(totalVal / 100000).toFixed(1)} L`, icon: IndianRupee, tooltip: 'Total valuation of all raw feed, bio-inputs, and products held across rural marts.' },
-    { id: 'total-skus', label: 'Total Products', value: totalSKUs.toLocaleString('en-IN'), icon: PackageCheck, tooltip: 'Total registered active stock keeping units across agricultural input categories.' },
-    { id: 'low-stock', label: 'Low-stock Products', value: lowStockCount.toString(), icon: AlertTriangle, tooltip: 'Products whose quantity has fallen below designated safety threshold levels.' },
-    { id: 'out-of-stock', label: 'Out-of-stock Products', value: outOfStockCount.toString(), icon: XCircle, tooltip: 'Products with zero stock balance requiring immediate PO issuance.' },
-    { id: 'procurement-qty', label: 'Procurement Quantity', value: procurementTotal.toLocaleString('en-IN'), icon: Truck, tooltip: 'Total inventory units procured from central warehouses and local FPGs.' },
-    { id: 'sales-qty', label: 'Sales Quantity', value: salesTotal.toLocaleString('en-IN'), icon: ShoppingBag, tooltip: 'Total inventory units fulfilled and billed to registered member farmers.' },
+    { id: 'inv-value', label: 'Inventory Value', value: formatLakhsCr(totalVal), icon: IndianRupee, tooltip: 'Total valuation (purchase price × current stock) of all products held across rural marts.' },
+    { id: 'total-skus', label: 'Total Products', value: totalSKUs.toLocaleString('en-IN'), icon: PackageCheck, tooltip: 'Total registered products across all rural marts.' },
+    { id: 'out-of-stock', label: 'Out-of-stock Products', value: outOfStockCount.toString(), icon: XCircle, tooltip: 'Products with zero or negative stock balance.' },
+    { id: 'procurement-qty', label: 'Procurement Quantity', value: procurementQtyTotal.toLocaleString('en-IN'), icon: Truck, tooltip: 'Total units procured in the selected period.' },
+    { id: 'procurement-value', label: 'Procurement Value', value: formatLakhsCr(procurementValueTotal), icon: Truck, tooltip: 'Total cost of procurement batches recorded in the selected period.' },
+    { id: 'sales-qty', label: 'Sales Quantity', value: salesTotal.toLocaleString('en-IN'), icon: ShoppingBag, tooltip: 'Total units sold to farmers in the selected period.' },
   ]
 
   return (

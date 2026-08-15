@@ -7,10 +7,8 @@ export default function MartFinancialDetailModal({ mart, onClose }) {
   const grossProfitVal = mart.grossProfitRaw
   const opexVal = mart.operatingExpensesRaw
   const netProfitVal = mart.netProfitRaw
-
-  const logisticsEst = Math.round(opexVal * 0.4)
-  const staffSalaryEst = Math.round(opexVal * 0.35)
-  const rentUtilitiesEst = Math.round(opexVal * 0.25)
+  const expenseBreakdown = mart.expenseBreakdown || {}
+  const expenseCategories = Object.entries(expenseBreakdown).sort((a, b) => b[1] - a[1])
 
   const downloadStatement = () => {
     alert(`Downloading complete P&L financial statement for ${mart.name} Rural Mart...`)
@@ -83,18 +81,16 @@ export default function MartFinancialDetailModal({ mart, onClose }) {
                 <span className="text-brand-warning-dark font-bold">-₹{opexVal.toLocaleString('en-IN')}</span>
               </div>
               <div className="p-2.5 pl-8 text-[11px] space-y-1 text-brand-text-muted">
-                <div className="flex justify-between">
-                  <span>• Freight &amp; Transport:</span>
-                  <span>₹{logisticsEst.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>• Staff &amp; Operations Salaries:</span>
-                  <span>₹{staffSalaryEst.toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>• Facility Rent &amp; Power Utilities:</span>
-                  <span>₹{rentUtilitiesEst.toLocaleString('en-IN')}</span>
-                </div>
+                {expenseCategories.length === 0 ? (
+                  <p className="italic">No operating expenses recorded for this period.</p>
+                ) : (
+                  expenseCategories.map(([category, amount]) => (
+                    <div key={category} className="flex justify-between">
+                      <span>• {category}:</span>
+                      <span>₹{amount.toLocaleString('en-IN')}</span>
+                    </div>
+                  ))
+                )}
               </div>
               <div className="p-3.5 flex justify-between items-center bg-brand-primary text-white font-extrabold text-sm rounded-b-xl">
                 <span>(=) Net Earnings / Net Profit</span>

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { X, Building2, Target, HeartHandshake, Download, CheckCircle2, CalendarCheck } from 'lucide-react'
 
 export default function MartOutreachDetailModal({ mart, onClose }) {
+  const activityEntries = mart ? Object.entries(mart.activityTypeBreakdown || {}).sort((a, b) => b[1] - a[1]) : []
   useEffect(() => {
     document.body.style.overflow = mart ? 'hidden' : ''
     return () => {
@@ -62,27 +63,16 @@ export default function MartOutreachDetailModal({ mart, onClose }) {
             </div>
 
             <div className="divide-y divide-brand-border">
-              <div className="p-3 flex justify-between items-center bg-brand-surface">
-                <div>
-                  <span className="font-bold text-brand-text block">Veterinary &amp; Cattle Health Camps</span>
-                  <span className="text-[10px] text-brand-text-subtle">Vaccinations, deworming, feed nutrition guidance</span>
-                </div>
-                <span className="font-bold text-brand-primary">{Math.round(mart.outreachProgramsConducted * 0.45)} Camps</span>
-              </div>
-              <div className="p-3 flex justify-between items-center bg-brand-bg-subtle">
-                <div>
-                  <span className="font-bold text-brand-text block">Soil Health &amp; Organic Farming Workshops</span>
-                  <span className="text-[10px] text-brand-text-subtle">Bio-fertilizer demos, crop soil testing</span>
-                </div>
-                <span className="font-bold text-brand-accent">{Math.round(mart.outreachProgramsConducted * 0.35)} Workshops</span>
-              </div>
-              <div className="p-3 flex justify-between items-center bg-brand-surface">
-                <div>
-                  <span className="font-bold text-brand-text block">Farmer Producer Group (FPG) Melas</span>
-                  <span className="text-[10px] text-brand-text-subtle">Direct input aggregation, fair pricing access</span>
-                </div>
-                <span className="font-bold text-brand-primary-dark">{Math.round(mart.outreachProgramsConducted * 0.2)} Melas</span>
-              </div>
+              {activityEntries.length === 0 ? (
+                <div className="p-3 text-center text-brand-text-muted italic">No outreach programs recorded in the selected period.</div>
+              ) : (
+                activityEntries.map(([activityType, count], idx) => (
+                  <div key={activityType} className={`p-3 flex justify-between items-center ${idx % 2 === 0 ? 'bg-brand-surface' : 'bg-brand-bg-subtle'}`}>
+                    <span className="font-bold text-brand-text">{activityType}</span>
+                    <span className="font-bold text-brand-primary">{count}</span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

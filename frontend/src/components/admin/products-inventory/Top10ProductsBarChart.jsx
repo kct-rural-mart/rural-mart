@@ -1,5 +1,5 @@
+import { useMemo } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { TOP_10_PRODUCTS_DATA } from '../../../lib/newPages/mockData'
 import { CHART_COLORS } from '../../../lib/newPages/chartColors'
 
 function CustomTooltip({ active, payload }) {
@@ -13,11 +13,11 @@ function CustomTooltip({ active, payload }) {
         </div>
         <div className="flex items-center justify-between text-white/90">
           <span className="font-medium">Total Sales Volume:</span>
-          <span className="font-mono font-bold">{item.salesQty.toLocaleString('en-IN')} Units</span>
+          <span className="font-mono font-bold">{item.soldQty.toLocaleString('en-IN')} Units</span>
         </div>
         <div className="flex items-center justify-between text-brand-primary-light font-bold border-t border-white/20 pt-1">
           <span>Generated Revenue:</span>
-          <span className="font-mono text-sm">₹{(item.revenue / 100000).toFixed(2)} Lakhs</span>
+          <span className="font-mono text-sm">₹{item.revenue.toLocaleString('en-IN')}</span>
         </div>
       </div>
     )
@@ -25,8 +25,14 @@ function CustomTooltip({ active, payload }) {
   return null
 }
 
-export default function Top10ProductsBarChart() {
-  const data = [...TOP_10_PRODUCTS_DATA].reverse()
+export default function Top10ProductsBarChart({ products }) {
+  const data = useMemo(() => {
+    return [...products]
+      .filter((p) => p.soldQty > 0)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10)
+      .reverse()
+  }, [products])
 
   return (
     <div className="bg-brand-surface border border-brand-border rounded-2xl p-4 shadow-xs hover:shadow-md hover:-translate-y-0.5 hover:border-brand-primary/40 transition-all duration-200 flex flex-col justify-between">
@@ -43,11 +49,11 @@ export default function Top10ProductsBarChart() {
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} layout="vertical" margin={{ top: 5, right: 20, left: 40, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.border} horizontal={false} />
-              <XAxis type="number" tick={{ fill: CHART_COLORS.textMuted, fontSize: 10, fontWeight: 500 }} axisLine={{ stroke: CHART_COLORS.border }} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(1)}k`} />
+              <XAxis type="number" tick={{ fill: CHART_COLORS.textMuted, fontSize: 10, fontWeight: 500 }} axisLine={{ stroke: CHART_COLORS.border }} tickLine={false} />
               <YAxis type="category" dataKey="name" width={130} tick={{ fill: CHART_COLORS.textMuted, fontSize: 10, fontWeight: 600 }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} wrapperStyle={{ pointerEvents: 'none', outline: 'none' }} isAnimationActive={false} />
 
-              <Bar dataKey="salesQty" radius={[0, 4, 4, 0]} barSize={14}>
+              <Bar dataKey="soldQty" radius={[0, 4, 4, 0]} barSize={14}>
                 {data.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={index === data.length - 1 ? CHART_COLORS.primary : index >= data.length - 3 ? CHART_COLORS.info : '#10b981'} />
                 ))}

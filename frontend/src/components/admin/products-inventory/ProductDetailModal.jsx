@@ -1,9 +1,8 @@
-import { X, Package, Tag, AlertCircle, Truck, Printer } from 'lucide-react'
+import { X, Package, Tag, Truck, Printer } from 'lucide-react'
+import { formatLakhsCr } from '../../../lib/queries/finance'
 
 export default function ProductDetailModal({ product, onClose }) {
   if (!product) return null
-
-  const stockPercentage = Math.min(Math.round((product.stockQty / (product.reorderLevel * 3 || 1)) * 100), 100)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-brand-text/60 backdrop-blur-xs p-4">
@@ -14,10 +13,7 @@ export default function ProductDetailModal({ product, onClose }) {
               <Package className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold text-brand-primary-dark bg-brand-primary-light px-2 py-0.5 rounded">{product.code}</span>
-                <span className="text-xs text-brand-text-muted">ID: {product.id}</span>
-              </div>
+              <span className="text-xs font-mono font-bold text-brand-primary-dark bg-brand-primary-light px-2 py-0.5 rounded">{product.category}</span>
               <h2 className="text-lg font-black text-brand-text tracking-tight mt-0.5">{product.name}</h2>
             </div>
           </div>
@@ -31,49 +27,28 @@ export default function ProductDetailModal({ product, onClose }) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 rounded-2xl bg-brand-bg-subtle border border-brand-border/70">
               <span className="text-[10px] font-bold uppercase text-brand-text-subtle block">Stock Balance</span>
-              <span className="text-xl font-black font-mono text-brand-text">{product.stockQty.toLocaleString('en-IN')}</span>
-              <span className="text-[10px] text-brand-text-muted block mt-0.5">Reorder @ {product.reorderLevel}</span>
+              <span className={`text-xl font-black font-mono ${product.status === 'Out of Stock' ? 'text-brand-danger' : 'text-brand-text'}`}>
+                {product.stockQty.toLocaleString('en-IN')} {product.unit}
+              </span>
+              <span className="text-[10px] text-brand-text-subtle block mt-0.5">{product.status}</span>
             </div>
 
             <div className="p-3 rounded-2xl bg-brand-bg-subtle border border-brand-border/70">
-              <span className="text-[10px] font-bold uppercase text-brand-text-subtle block">Unit Cost</span>
-              <span className="text-xl font-black font-mono text-brand-text">₹{product.unitPrice.toLocaleString('en-IN')}</span>
-              <span className="text-[10px] text-brand-text-muted block mt-0.5">GST Included</span>
+              <span className="text-[10px] font-bold uppercase text-brand-text-subtle block">Selling Price</span>
+              <span className="text-xl font-black font-mono text-brand-text">₹{product.sellingPrice.toLocaleString('en-IN')}</span>
+              <span className="text-[10px] text-brand-text-subtle block mt-0.5">per {product.unit}</span>
             </div>
 
             <div className="p-3 rounded-2xl bg-brand-bg-subtle border border-brand-border/70">
               <span className="text-[10px] font-bold uppercase text-brand-text-subtle block">Inventory Valuation</span>
-              <span className="text-xl font-black font-mono text-brand-primary">₹{product.inventoryValue.toLocaleString('en-IN')}</span>
-              <span className="text-[10px] text-brand-text-muted block mt-0.5">Total Holding Value</span>
+              <span className="text-xl font-black font-mono text-brand-primary">{formatLakhsCr(product.inventoryValue)}</span>
+              <span className="text-[10px] text-brand-text-subtle block mt-0.5">Purchase price × current stock</span>
             </div>
 
             <div className="p-3 rounded-2xl bg-brand-bg-subtle border border-brand-border/70">
               <span className="text-[10px] font-bold uppercase text-brand-text-subtle block">Sales Volume</span>
-              <span className="text-xl font-black font-mono text-brand-info">{product.salesQty.toLocaleString('en-IN')}</span>
-              <span className="text-[10px] text-brand-text-muted block mt-0.5">YTD Units Sold</span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-2xl border border-brand-border bg-brand-bg-subtle/50 space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-brand-text">
-              <span className="flex items-center gap-1.5">
-                <AlertCircle className="w-4 h-4 text-brand-primary" />
-                Safety Stock &amp; Reorder Gauge
-              </span>
-              <span className="font-mono">{product.status}</span>
-            </div>
-            <div className="w-full bg-brand-border h-3 rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all duration-500 rounded-full ${
-                  product.status === 'Out of Stock' ? 'bg-brand-danger' : product.status === 'Low Stock' ? 'bg-brand-warning' : 'bg-brand-primary'
-                }`}
-                style={{ width: `${Math.max(stockPercentage, 5)}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-[10px] text-brand-text-subtle font-mono">
-              <span>0 Units</span>
-              <span>Reorder: {product.reorderLevel} Units</span>
-              <span>Target: {product.reorderLevel * 3} Units</span>
+              <span className="text-xl font-black font-mono text-brand-info">{product.soldQty.toLocaleString('en-IN')}</span>
+              <span className="text-[10px] text-brand-text-subtle block mt-0.5">Units sold, selected period</span>
             </div>
           </div>
 
@@ -89,16 +64,16 @@ export default function ProductDetailModal({ product, onClose }) {
                   <span className="font-semibold text-brand-text">{product.category}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-brand-text-subtle">Hub Mart:</span>
-                  <span className="font-semibold text-brand-text">{product.ruralMart} Rural Mart</span>
+                  <span className="text-brand-text-subtle">Rural Mart:</span>
+                  <span className="font-semibold text-brand-text">{product.ruralMart}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-brand-text-subtle">District:</span>
                   <span className="font-semibold text-brand-text">{product.district}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-brand-text-subtle">Last Restocked:</span>
-                  <span className="font-semibold text-brand-text">{product.lastRestocked}</span>
+                  <span className="text-brand-text-subtle">Purchase Price:</span>
+                  <span className="font-semibold text-brand-text">₹{product.purchasePrice.toLocaleString('en-IN')}</span>
                 </div>
               </div>
             </div>
@@ -106,12 +81,22 @@ export default function ProductDetailModal({ product, onClose }) {
             <div className="space-y-3 p-4 rounded-2xl border border-brand-border/70">
               <h4 className="font-bold text-brand-text border-b border-brand-border/60 pb-1.5 flex items-center gap-1.5">
                 <Truck className="w-3.5 h-3.5 text-brand-primary" />
-                Procurement
+                Procurement (Selected Period)
               </h4>
               <div className="space-y-2 text-brand-text-muted">
                 <div className="flex justify-between">
-                  <span className="text-brand-text-subtle">Procured YTD:</span>
-                  <span className="font-mono font-semibold">{product.procurementQty} Units</span>
+                  <span className="text-brand-text-subtle">Quantity Procured:</span>
+                  <span className="font-mono font-semibold">
+                    {product.procuredQty.toLocaleString('en-IN')} {product.unit}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-brand-text-subtle">Procurement Cost:</span>
+                  <span className="font-mono font-semibold">₹{product.procuredValue.toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-brand-text-subtle">Sales Revenue:</span>
+                  <span className="font-mono font-semibold text-brand-primary">₹{product.revenue.toLocaleString('en-IN')}</span>
                 </div>
               </div>
             </div>

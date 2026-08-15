@@ -26,6 +26,7 @@ export default function AdminLayout() {
   const [marts, setMarts] = useState(() => getReportsRuralMarts())
   const [alerts, setAlerts] = useState(() => getAlerts())
   const [lastSyncedTime, setLastSyncedTime] = useState('Not synced yet')
+  const [refreshKey, setRefreshKey] = useState(0)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [exportModalOpen, setExportModalOpen] = useState(false)
   const [allAlertsModalOpen, setAllAlertsModalOpen] = useState(false)
@@ -50,6 +51,7 @@ export default function AdminLayout() {
   const handleSync = () => {
     const now = new Date()
     setLastSyncedTime(now.toLocaleString([], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))
+    setRefreshKey((k) => k + 1)
   }
 
   const handleReviewAlert = (alertId, newStatus) => {
@@ -113,6 +115,7 @@ export default function AdminLayout() {
               onReviewAlert: handleReviewAlert,
               filters,
               onOpenAllAlertsModal: () => setAllAlertsModalOpen(true),
+              refreshKey,
             }}
           />
         </main>

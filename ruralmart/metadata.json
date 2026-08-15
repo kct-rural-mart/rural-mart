@@ -1,0 +1,8 @@
+{
+  "name": "admin copy of Remix Fix Rural Mart Combined",
+  "description": "Executive Overview Dashboard for Rural Mart network monitoring, performance, and impact",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

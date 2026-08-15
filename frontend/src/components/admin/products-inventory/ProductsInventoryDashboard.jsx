@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import ProductsKpiCards from './ProductsKpiCards'
 import ProductInventoryTable from './ProductInventoryTable'
 import InventoryMovementLineChart from './InventoryMovementLineChart'
@@ -7,47 +8,62 @@ import CategoryPerformanceDonutChart from './CategoryPerformanceDonutChart'
 import StockHealthStackedBarChart from './StockHealthStackedBarChart'
 import FastSlowMovingTable from './FastSlowMovingTable'
 import ProductDetailModal from './ProductDetailModal'
-import { getProducts, getRuralMarts } from '../../../lib/newPages/shared/dataServices'
+import { getAdminProductsData } from '../../../lib/queries/adminProducts'
 
-export default function ProductsInventoryDashboard({ filters, searchQuery, setSearchQuery }) {
+export default function ProductsInventoryDashboard({ filters, searchQuery, setSearchQuery, refreshKey: layoutRefreshKey }) {
   const [selectedProduct, setSelectedProduct] = useState(null)
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
-  const allProducts = useMemo(() => {
-    const canonicalProducts = getProducts()
-    const canonicalMarts = getRuralMarts()
+  useEffect(() => {
+    let isMounted = true
 
-    return canonicalProducts.map((p) => {
-      const mart = canonicalMarts.find((m) => m.ruralMartId === p.ruralMartId)
-      let martDisplayName = p.ruralMartId || 'Rural Mart'
-      if (mart) {
-        martDisplayName = mart.ruralMartName.replace(' Rural Mart', '').replace(' Agro Mart', '').replace(' Farmers Hub', '')
+    async function load() {
+      setLoading(true)
+      setError('')
+      try {
+        const result = await getAdminProductsData({ dateRange: filters.dateRange })
+        if (isMounted) setData(result)
+      } catch (err) {
+        if (isMounted) setError(err.message || 'Failed to load product inventory data.')
+      } finally {
+        if (isMounted) setLoading(false)
       }
-      return {
-        id: p.id,
-        code: p.code,
-        name: p.name,
-        category: p.category,
-        ruralMart: martDisplayName,
-        district: p.district || (mart ? mart.district : 'Erode'),
-        stockQty: p.stockQty,
-        reorderLevel: p.reorderLevel,
-        unitPrice: p.sellingPrice,
-        salesQty: p.salesQty ?? 0,
-        procurementQty: p.procurementQty ?? 0,
-        inventoryValue: p.inventoryValue ?? p.stockQty * p.sellingPrice,
-        status: p.status,
-        lastRestocked: p.lastRestocked,
-      }
-    })
-  }, [])
+    }
+
+    load()
+    return () => {
+      isMounted = false
+    }
+  }, [filters.dateRange, layoutRefreshKey])
 
   const filteredProducts = useMemo(() => {
+    const allProducts = data?.products ?? []
     return allProducts.filter((item) => {
       const matchDistrict = filters.district === 'All Districts' || item.district === filters.district
       const matchMart = filters.ruralMart === 'All Rural Marts' || item.ruralMart.toLowerCase().includes(filters.ruralMart.toLowerCase())
       return matchDistrict && matchMart
     })
-  }, [allProducts, filters.district, filters.ruralMart])
+  }, [data, filters.district, filters.ruralMart])
+
+  if (loading && !data) {
+    return (
+      <div className="flex items-center justify-center h-64 text-brand-text-muted gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        <span className="text-sm font-medium">Loading Products &amp; Inventory…</span>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-2 p-4 rounded-xl bg-brand-danger-light border border-brand-danger-border text-brand-danger text-sm">
+        <AlertCircle className="w-4 h-4 shrink-0" />
+        <span>{error}</span>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -60,17 +76,17 @@ export default function ProductsInventoryDashboard({ filters, searchQuery, setSe
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <InventoryMovementLineChart />
-        <Top10ProductsBarChart />
+        <InventoryMovementLineChart trendData={data.trendData} />
+        <Top10ProductsBarChart products={filteredProducts} />
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <CategoryPerformanceDonutChart />
-        <StockHealthStackedBarChart />
+        <CategoryPerformanceDonutChart products={filteredProducts} />
+        <StockHealthStackedBarChart products={filteredProducts} />
       </section>
 
       <section>
-        <FastSlowMovingTable />
+        <FastSlowMovingTable products={filteredProducts} />
       </section>
 
       <ProductDetailModal product={selectedProduct} onClose={() => setSelectedProduct(null)} />

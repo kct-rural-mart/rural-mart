@@ -1,28 +1,19 @@
 import { useState } from 'react'
-import { Search, ArrowUpDown, ChevronLeft, ChevronRight, Eye, Download, CheckCircle2, AlertTriangle, XCircle, Filter } from 'lucide-react'
+import { Search, ArrowUpDown, ChevronLeft, ChevronRight, Eye, Download, CheckCircle2, XCircle, Filter } from 'lucide-react'
 
 function getStatusBadge(status) {
-  switch (status) {
-    case 'Healthy':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-primary-light text-brand-primary-dark">
-          <CheckCircle2 className="w-2.5 h-2.5" /> Healthy
-        </span>
-      )
-    case 'Low Stock':
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-warning-light text-brand-warning-dark">
-          <AlertTriangle className="w-2.5 h-2.5" /> Low Stock
-        </span>
-      )
-    case 'Out of Stock':
-    default:
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-danger-light text-brand-danger">
-          <XCircle className="w-2.5 h-2.5" /> Out of Stock
-        </span>
-      )
+  if (status === 'Healthy') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-primary-light text-brand-primary-dark">
+        <CheckCircle2 className="w-2.5 h-2.5" /> Healthy
+      </span>
+    )
   }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-danger-light text-brand-danger">
+      <XCircle className="w-2.5 h-2.5" /> Out of Stock
+    </span>
+  )
 }
 
 export default function ProductInventoryTable({ products, onSelectProduct, searchQuery, setSearchQuery }) {
@@ -43,7 +34,7 @@ export default function ProductInventoryTable({ products, onSelectProduct, searc
 
   const filteredProducts = products.filter((p) => {
     const q = searchQuery.toLowerCase()
-    const matchesSearch = p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || p.ruralMart.toLowerCase().includes(q)
+    const matchesSearch = p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q) || p.ruralMart.toLowerCase().includes(q)
     const matchesStatus = statusFilter === 'All' || p.status === statusFilter
     return matchesSearch && matchesStatus
   })
@@ -62,8 +53,8 @@ export default function ProductInventoryTable({ products, onSelectProduct, searc
   const paginatedProducts = sortedProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
   const exportToCsv = () => {
-    const headers = ['Product Code', 'Product Name', 'Category', 'Rural Mart', 'District', 'Stock Qty', 'Reorder Level', 'Sales Qty', 'Unit Price (₹)', 'Inventory Value (₹)', 'Status']
-    const rows = sortedProducts.map((p) => [p.code, `"${p.name}"`, `"${p.category}"`, p.ruralMart, p.district, p.stockQty, p.reorderLevel, p.salesQty, p.unitPrice, p.inventoryValue, p.status])
+    const headers = ['Product Name', 'Category', 'Rural Mart', 'District', 'Stock Qty', 'Sales Qty', 'Selling Price (₹)', 'Inventory Value (₹)', 'Status']
+    const rows = sortedProducts.map((p) => [`"${p.name}"`, `"${p.category}"`, p.ruralMart, p.district, p.stockQty, p.soldQty, p.sellingPrice, p.inventoryValue, p.status])
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
     const encodedUri = encodeURI(csvContent)
@@ -94,7 +85,6 @@ export default function ProductInventoryTable({ products, onSelectProduct, searc
               >
                 <option value="All">All Statuses</option>
                 <option value="Healthy">Healthy</option>
-                <option value="Low Stock">Low Stock</option>
                 <option value="Out of Stock">Out of Stock</option>
               </select>
             </div>
@@ -139,7 +129,7 @@ export default function ProductInventoryTable({ products, onSelectProduct, searc
                   </button>
                 </th>
                 <th className="py-2.5 px-3 text-right">
-                  <button onClick={() => handleSort('salesQty')} className="flex items-center gap-1 ml-auto hover:text-brand-text">
+                  <button onClick={() => handleSort('soldQty')} className="flex items-center gap-1 ml-auto hover:text-brand-text">
                     Sales Qty <ArrowUpDown className="w-3 h-3" />
                   </button>
                 </th>
@@ -164,7 +154,7 @@ export default function ProductInventoryTable({ products, onSelectProduct, searc
                     <td className="py-3 px-3">
                       <div className="flex flex-col">
                         <span className="font-bold text-brand-text text-xs group-hover:text-brand-primary">{p.name}</span>
-                        <span className="text-[10px] text-brand-text-subtle font-mono">{p.code} • {p.ruralMart} Hub</span>
+                        <span className="text-[10px] text-brand-text-subtle">{p.ruralMart}</span>
                       </div>
                     </td>
 
@@ -173,12 +163,12 @@ export default function ProductInventoryTable({ products, onSelectProduct, searc
                     </td>
 
                     <td className="py-3 px-3 text-right font-mono font-bold">
-                      <span className={p.status === 'Out of Stock' ? 'text-brand-danger font-extrabold' : p.status === 'Low Stock' ? 'text-brand-warning' : 'text-brand-primary'}>
-                        {p.stockQty.toLocaleString('en-IN')} Units
+                      <span className={p.status === 'Out of Stock' ? 'text-brand-danger font-extrabold' : 'text-brand-primary'}>
+                        {p.stockQty.toLocaleString('en-IN')} {p.unit}
                       </span>
                     </td>
 
-                    <td className="py-3 px-3 text-right font-mono font-bold text-brand-text">{p.salesQty.toLocaleString('en-IN')}</td>
+                    <td className="py-3 px-3 text-right font-mono font-bold text-brand-text">{p.soldQty.toLocaleString('en-IN')}</td>
 
                     <td className="py-3 px-3 text-center">{getStatusBadge(p.status)}</td>
 
@@ -209,7 +199,9 @@ export default function ProductInventoryTable({ products, onSelectProduct, searc
           <button onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1} className="p-1.5 rounded-lg border border-brand-border disabled:opacity-40 hover:bg-brand-bg-subtle transition-colors">
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="px-2 font-semibold text-brand-text">{currentPage} / {totalPages}</span>
+          <span className="px-2 font-semibold text-brand-text">
+            {currentPage} / {totalPages}
+          </span>
           <button onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages} className="p-1.5 rounded-lg border border-brand-border disabled:opacity-40 hover:bg-brand-bg-subtle transition-colors">
             <ChevronRight className="w-4 h-4" />
           </button>

@@ -50,15 +50,16 @@ export default function FarmerDetailModal({ farmer, onClose }) {
             </div>
 
             <div className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border">
-              <span className="text-[10px] font-semibold text-brand-text-muted uppercase">Category / Specialization</span>
+              <span className="text-[10px] font-semibold text-brand-text-muted uppercase">Demographics</span>
               <p className="font-bold text-brand-text mt-1 flex items-center gap-1">
-                <HeartHandshake className="w-3.5 h-3.5 text-brand-primary" /> {farmer.category}
+                <HeartHandshake className="w-3.5 h-3.5 text-brand-primary" /> {farmer.gender || 'Not specified'}
+                {farmer.age ? `, ${farmer.age} yrs` : ''}
               </p>
             </div>
 
             <div className="p-3 rounded-xl bg-brand-bg-subtle border border-brand-border">
-              <span className="text-[10px] font-semibold text-brand-text-muted uppercase">Animal Head Count</span>
-              <p className="font-bold text-brand-primary mt-1">{farmer.animalHeadCount} Head</p>
+              <span className="text-[10px] font-semibold text-brand-text-muted uppercase">Cattle Count</span>
+              <p className="font-bold text-brand-primary mt-1">{farmer.cattleCount} Head</p>
             </div>
           </div>
 
@@ -67,13 +68,13 @@ export default function FarmerDetailModal({ farmer, onClose }) {
               <span className="font-bold text-brand-text flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-brand-primary" /> Contact Phone:
               </span>
-              <span className="font-bold text-brand-text">{farmer.phone}</span>
+              <span className="font-bold text-brand-text">{farmer.mobile || 'N/A'}</span>
             </div>
             <div className="flex justify-between items-center pb-2 border-b border-brand-border">
               <span className="font-bold text-brand-text flex items-center gap-1.5">
                 <Calendar className="w-3.5 h-3.5 text-brand-primary" /> Registration Date:
               </span>
-              <span className="font-medium text-brand-text-muted">{farmer.joinedDate}</span>
+              <span className="font-medium text-brand-text-muted">{new Date(farmer.joinedDate).toLocaleDateString('en-IN')}</span>
             </div>
             <div className="flex justify-between items-center pb-2 border-b border-brand-border">
               <span className="font-bold text-brand-text flex items-center gap-1.5">
@@ -83,7 +84,7 @@ export default function FarmerDetailModal({ farmer, onClose }) {
             </div>
             <div className="flex justify-between items-center">
               <span className="font-bold text-brand-text">Last Mart Visit:</span>
-              <span className="font-medium text-brand-text-muted">{farmer.lastVisit}</span>
+              <span className="font-medium text-brand-text-muted">{farmer.lastVisit ? new Date(farmer.lastVisit).toLocaleDateString('en-IN') : 'No purchases yet'}</span>
             </div>
           </div>
         </div>

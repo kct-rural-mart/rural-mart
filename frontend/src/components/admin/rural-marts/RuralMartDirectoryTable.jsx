@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Search, Filter, Eye, ArrowUpDown, ChevronLeft, ChevronRight, Store, MapPin, CheckCircle2, Clock, AlertCircle, FileSpreadsheet } from 'lucide-react'
+import { formatLakhsCr } from '../../../lib/queries/finance'
+import { formatDaysAgo } from '../../../utils/date'
 
 export default function RuralMartDirectoryTable({ marts, onSelectMart }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [districtFilter, setDistrictFilter] = useState('All')
-  const [sortField, setSortField] = useState('score')
+  const [sortField, setSortField] = useState('netProfitRaw')
   const [sortOrder, setSortOrder] = useState('desc')
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 10
@@ -20,7 +22,7 @@ export default function RuralMartDirectoryTable({ marts, onSelectMart }) {
       .filter((m) => {
         const matchesSearch =
           m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          m.manager.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (m.entrepreneurName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
           m.district.toLowerCase().includes(searchTerm.toLowerCase())
 
         const matchesStatus = statusFilter === 'All' || m.status.toLowerCase() === statusFilter.toLowerCase()
@@ -55,8 +57,8 @@ export default function RuralMartDirectoryTable({ marts, onSelectMart }) {
   }
 
   const exportToCSV = () => {
-    const headers = ['Rural Mart', 'Manager', 'District', 'Status', 'Score', 'Sales (₹)', 'Registered Farmers', 'Last Updated']
-    const rows = filteredMarts.map((m) => [m.name, m.manager, m.district, m.status, m.score, m.salesRaw, m.registeredFarmers, m.lastUpdated])
+    const headers = ['Rural Mart', 'Owner/Manager', 'District', 'Status', 'Net Profit (₹)', 'Sales (₹)', 'Registered Farmers', 'Days Since Last Sale']
+    const rows = filteredMarts.map((m) => [m.name, m.entrepreneurName || '', m.district, m.status, m.netProfitRaw, m.salesRaw, m.registeredFarmers, m.daysSinceLastSale ?? ''])
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
 
@@ -148,16 +150,16 @@ export default function RuralMartDirectoryTable({ marts, onSelectMart }) {
                 </th>
                 <th className="py-2.5 px-3">Owner / Manager</th>
                 <th className="py-2.5 px-3">District</th>
-                <th onClick={() => handleSort('score')} className="py-2.5 px-3 cursor-pointer hover:bg-brand-border/40 transition-colors">
+                <th onClick={() => handleSort('netProfitRaw')} className="py-2.5 px-3 cursor-pointer hover:bg-brand-border/40 transition-colors">
                   <div className="flex items-center gap-1">
-                    <span>Score</span>
+                    <span>Net Profit</span>
                     <ArrowUpDown className="w-3 h-3 text-brand-text-subtle" />
                   </div>
                 </th>
                 <th className="py-2.5 px-3">Status</th>
-                <th onClick={() => handleSort('lastUpdated')} className="py-2.5 px-3 cursor-pointer hover:bg-brand-border/40 transition-colors">
+                <th onClick={() => handleSort('daysSinceLastSale')} className="py-2.5 px-3 cursor-pointer hover:bg-brand-border/40 transition-colors">
                   <div className="flex items-center gap-1">
-                    <span>Last Updated</span>
+                    <span>Last Sale</span>
                     <ArrowUpDown className="w-3 h-3 text-brand-text-subtle" />
                   </div>
                 </th>
@@ -185,14 +187,14 @@ export default function RuralMartDirectoryTable({ marts, onSelectMart }) {
                           </div>
                           <div>
                             <span className="block font-bold">{mart.name}</span>
-                            <span className="text-[10px] text-brand-text-subtle">₹{(mart.salesRaw / 100000).toFixed(1)}L Sales</span>
+                            <span className="text-[10px] text-brand-text-subtle">{formatLakhsCr(mart.salesRaw)} Sales</span>
                           </div>
                         </div>
                       </td>
 
                       <td className="py-2.5 px-3 text-brand-text">
-                        <span className="block font-medium">{mart.manager}</span>
-                        <span className="text-[10px] text-brand-text-subtle font-mono">{mart.contact}</span>
+                        <span className="block font-medium">{mart.entrepreneurName || 'Not Assigned'}</span>
+                        <span className="text-[10px] text-brand-text-subtle font-mono">{mart.phone || 'N/A'}</span>
                       </td>
 
                       <td className="py-2.5 px-3 text-brand-text-muted">
@@ -202,10 +204,7 @@ export default function RuralMartDirectoryTable({ marts, onSelectMart }) {
                         </span>
                       </td>
 
-                      <td className="py-2.5 px-3 font-mono font-bold text-brand-text">
-                        <span className="text-brand-primary">{mart.score}</span>
-                        <span className="text-[10px] text-brand-text-subtle font-normal">/100</span>
-                      </td>
+                      <td className="py-2.5 px-3 font-mono font-bold text-brand-text">{formatLakhsCr(mart.netProfitRaw)}</td>
 
                       <td className="py-2.5 px-3">
                         <span
@@ -218,7 +217,7 @@ export default function RuralMartDirectoryTable({ marts, onSelectMart }) {
                         </span>
                       </td>
 
-                      <td className="py-2.5 px-3 text-brand-text-muted text-[11px]">{mart.lastUpdated}</td>
+                      <td className="py-2.5 px-3 text-brand-text-muted text-[11px]">{formatDaysAgo(mart.daysSinceLastSale)}</td>
 
                       <td className="py-2.5 px-3 text-right">
                         <button

@@ -1,33 +1,20 @@
 import { useState } from 'react'
-import { X, Phone, User, MapPin, Award, Store, DollarSign, Users, Package, ShieldCheck } from 'lucide-react'
+import { X, Phone, User, MapPin, TrendingUp, Store, DollarSign, Users, Package, Receipt, Megaphone } from 'lucide-react'
+import { formatLakhsCr } from '../../../lib/queries/finance'
+import { formatDaysAgo } from '../../../utils/date'
 
 export default function RuralMartDetailModal({ mart, onClose }) {
   const [activeTab, setActiveTab] = useState('summary')
 
   if (!mart) return null
 
-  const formatLakhs = (raw) => `₹${(raw / 100000).toFixed(1)} Lakhs`
-
-  const salesRaw = mart.salesRaw || 0
-  const grossProfitRaw = mart.grossProfitRaw || 0
-  const netProfitRaw = Math.round(grossProfitRaw * 0.72)
-  const totalBills = Math.round(salesRaw / 650) || 0
-  const avgBillValue = Math.round(salesRaw / (totalBills || 1))
+  const expenseCategories = Object.entries(mart.expenseBreakdown || {}).sort((a, b) => b[1] - a[1])
 
   const tabs = [
-    { id: 'summary', label: 'Summary', icon: Award },
+    { id: 'summary', label: 'Summary', icon: TrendingUp },
     { id: 'business', label: 'Business & Finance', icon: DollarSign },
     { id: 'farmers', label: 'Farmers & Outreach', icon: Users },
     { id: 'products', label: 'Products & Inventory', icon: Package },
-  ]
-
-  const scoreRows = [
-    { label: 'Sales Growth', key: 'salesGrowth', max: 20 },
-    { label: 'Profitability', key: 'profitability', max: 20 },
-    { label: 'Farmer Engagement', key: 'farmerEngagement', max: 20 },
-    { label: 'Outreach Impact', key: 'outreachImpact', max: 15 },
-    { label: 'Inventory Health', key: 'inventoryHealth', max: 15 },
-    { label: 'Compliance & Sync', key: 'compliance', max: 10 },
   ]
 
   return (
@@ -47,11 +34,11 @@ export default function RuralMartDetailModal({ mart, onClose }) {
                   </span>
                   <span>•</span>
                   <span className="flex items-center gap-1">
-                    <User className="w-3 h-3 text-brand-primary" /> Manager: {mart.manager}
+                    <User className="w-3 h-3 text-brand-primary" /> Manager: {mart.entrepreneurName || 'Not Assigned'}
                   </span>
                   <span>•</span>
                   <span className="flex items-center gap-1 font-mono">
-                    <Phone className="w-3 h-3 text-brand-primary" /> {mart.contact}
+                    <Phone className="w-3 h-3 text-brand-primary" /> {mart.phone || 'N/A'}
                   </span>
                 </p>
               </div>
@@ -84,52 +71,30 @@ export default function RuralMartDetailModal({ mart, onClose }) {
         <div className="py-2 space-y-4">
           {activeTab === 'summary' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
-                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Overall Index Score</span>
-                  <p className="text-xl font-extrabold text-brand-primary-dark mt-1 font-mono flex items-center gap-1">
-                    <Award className="w-4 h-4 text-brand-warning shrink-0" />
-                    {mart.score} / 100
-                  </p>
-                </div>
-
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
                   <span className="text-[10px] font-bold text-brand-text-muted uppercase">Sales Revenue</span>
-                  <p className="text-xl font-extrabold text-brand-text mt-1 font-mono">{formatLakhs(salesRaw)}</p>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{formatLakhsCr(mart.salesRaw)}</p>
                 </div>
-
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
-                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Gross Profit</span>
-                  <p className="text-xl font-extrabold text-brand-accent mt-1 font-mono">{formatLakhs(grossProfitRaw)}</p>
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Net Profit</span>
+                  <p className="text-lg font-extrabold text-brand-accent mt-1 font-mono">{formatLakhsCr(mart.netProfitRaw)}</p>
                 </div>
-
                 <div className="p-3 bg-brand-primary-light rounded-xl border border-brand-primary/20">
-                  <span className="text-[10px] font-bold text-brand-primary-dark uppercase">Data Completeness</span>
-                  <p className="text-xl font-extrabold text-brand-primary-dark mt-1 font-mono">{mart.dataCompleteness}%</p>
+                  <span className="text-[10px] font-bold text-brand-primary-dark uppercase">Profit Margin</span>
+                  <p className="text-lg font-extrabold text-brand-primary-dark mt-1 font-mono">{mart.profitMargin}%</p>
                 </div>
-              </div>
-
-              <div className="bg-brand-bg-subtle/80 p-4 rounded-xl border border-brand-border/80 space-y-3">
-                <h3 className="text-xs font-bold text-brand-text uppercase tracking-wider flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-brand-primary" />
-                  6-Factor NABARD Composite Performance Breakdown
-                </h3>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  {scoreRows.map((row) => {
-                    const value = mart.scoreBreakdown?.[row.key] ?? 0
-                    return (
-                      <div key={row.key} className="space-y-1">
-                        <div className="flex justify-between font-semibold">
-                          <span className="text-brand-text-muted">{row.label} ({row.max} pts):</span>
-                          <span className="font-mono text-brand-accent">{value} / {row.max}</span>
-                        </div>
-                        <div className="w-full h-1.5 bg-brand-border rounded-full overflow-hidden">
-                          <div className="h-full bg-brand-primary rounded-full" style={{ width: `${(value / row.max) * 100}%` }} />
-                        </div>
-                      </div>
-                    )
-                  })}
+                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Registered Farmers</span>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{mart.registeredFarmers.toLocaleString('en-IN')}</p>
+                </div>
+                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Outreach Programs</span>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{mart.outreachProgramsConducted}</p>
+                </div>
+                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Last Sale</span>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{formatDaysAgo(mart.daysSinceLastSale)}</p>
                 </div>
               </div>
             </div>
@@ -140,22 +105,22 @@ export default function RuralMartDetailModal({ mart, onClose }) {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
                   <span className="text-[10px] font-bold text-brand-text-muted uppercase">Gross Sales Revenue</span>
-                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{formatLakhs(salesRaw)}</p>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{formatLakhsCr(mart.salesRaw)}</p>
                 </div>
 
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
                   <span className="text-[10px] font-bold text-brand-text-muted uppercase">Gross Profit</span>
-                  <p className="text-lg font-extrabold text-brand-accent mt-1 font-mono">{formatLakhs(grossProfitRaw)}</p>
+                  <p className="text-lg font-extrabold text-brand-accent mt-1 font-mono">{formatLakhsCr(mart.grossProfitRaw)}</p>
                 </div>
 
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
-                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Est. Net Margin</span>
-                  <p className="text-lg font-extrabold text-brand-accent mt-1 font-mono">{formatLakhs(netProfitRaw)}</p>
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Net Profit</span>
+                  <p className="text-lg font-extrabold text-brand-accent mt-1 font-mono">{formatLakhsCr(mart.netProfitRaw)}</p>
                 </div>
 
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
                   <span className="text-[10px] font-bold text-brand-text-muted uppercase">Avg Bill Value</span>
-                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">₹{avgBillValue.toLocaleString('en-IN')}</p>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">₹{mart.avgBillValue.toLocaleString('en-IN')}</p>
                 </div>
               </div>
 
@@ -164,52 +129,92 @@ export default function RuralMartDetailModal({ mart, onClose }) {
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
                   <div>
                     <span className="text-brand-text-muted">Total Invoices Issued:</span>
-                    <p className="font-mono font-bold text-brand-text">{totalBills.toLocaleString('en-IN')} Bills</p>
+                    <p className="font-mono font-bold text-brand-text">{mart.totalBills.toLocaleString('en-IN')} Bills</p>
                   </div>
                   <div>
                     <span className="text-brand-text-muted">Procurement Cost:</span>
-                    <p className="font-mono font-bold text-brand-text">{formatLakhs(salesRaw - grossProfitRaw)}</p>
+                    <p className="font-mono font-bold text-brand-text">{formatLakhsCr(mart.procurementRaw)}</p>
+                  </div>
+                  <div>
+                    <span className="text-brand-text-muted">Operating Expenses:</span>
+                    <p className="font-mono font-bold text-brand-text">{formatLakhsCr(mart.operatingExpensesRaw)}</p>
                   </div>
                 </div>
+
+                {expenseCategories.length > 0 && (
+                  <div className="pt-2 mt-2 border-t border-brand-border/60 space-y-1">
+                    <span className="text-brand-text-muted uppercase text-[10px] font-bold">Expense Breakdown</span>
+                    {expenseCategories.map(([category, amount]) => (
+                      <div key={category} className="flex justify-between">
+                        <span className="text-brand-text-muted">{category}</span>
+                        <span className="font-mono font-bold text-brand-text">₹{amount.toLocaleString('en-IN')}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {activeTab === 'farmers' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
                   <span className="text-[10px] font-bold text-brand-text-muted uppercase">Registered Farmers</span>
                   <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{mart.registeredFarmers.toLocaleString('en-IN')}</p>
                 </div>
 
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
-                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Active Footfall</span>
-                  <p className="text-lg font-extrabold text-brand-accent mt-1 font-mono">{(mart.farmerFootfall ?? 0).toLocaleString('en-IN')}</p>
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Outreach Programs</span>
+                  <p className="text-lg font-extrabold text-brand-accent mt-1 font-mono">{mart.outreachProgramsConducted}</p>
                 </div>
 
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
-                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Farmers Reached</span>
-                  <p className="text-lg font-extrabold text-brand-info mt-1 font-mono">{(mart.farmersReached ?? 0).toLocaleString('en-IN')}</p>
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Villages Covered</span>
+                  <p className="text-lg font-extrabold text-brand-info mt-1 font-mono">{mart.villagesCovered}</p>
                 </div>
 
                 <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
-                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Registered</span>
-                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{mart.dataCompleteness}%</p>
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Farmers Reached (Outreach)</span>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{mart.farmersReachedOutreach}</p>
+                </div>
+
+                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Animals Covered (Outreach)</span>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{mart.animalsCoveredOutreach.toLocaleString('en-IN')}</p>
                 </div>
               </div>
+
+              {mart.outreachProgramsConducted === 0 && (
+                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70 text-xs text-brand-text-muted flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-brand-primary shrink-0" />
+                  No outreach programs recorded for this Rural Mart in the selected period.
+                </div>
+              )}
             </div>
           )}
 
           {activeTab === 'products' && (
             <div className="space-y-4">
-              <div className="p-4 bg-brand-bg-subtle rounded-xl border border-brand-border text-xs space-y-2">
-                <h4 className="font-bold text-brand-text uppercase tracking-wider">Top Moving Items at {mart.name}</h4>
-                {mart.salesRaw > 0 ? (
-                  <p className="text-brand-text-muted italic py-1">Inventory analytics for this mart aren't wired up yet.</p>
-                ) : (
-                  <p className="text-brand-text-muted italic py-1">No sales items recorded for this Rural Mart.</p>
-                )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Total Products (SKUs)</span>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{mart.totalProducts}</p>
+                </div>
+                <div className="p-3 bg-brand-bg-subtle rounded-xl border border-brand-border/70">
+                  <span className="text-[10px] font-bold text-brand-text-muted uppercase">Procurement Cost (Period)</span>
+                  <p className="text-lg font-extrabold text-brand-text mt-1 font-mono">{formatLakhsCr(mart.procurementRaw)}</p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-brand-bg-subtle rounded-xl border border-brand-border text-xs space-y-1.5 text-brand-text-muted">
+                <div className="flex items-center gap-1.5 font-bold text-brand-text uppercase tracking-wider">
+                  <Receipt className="w-3.5 h-3.5 text-brand-primary" /> Stock Levels
+                </div>
+                <p>
+                  Per-product stock health (Healthy / Low Stock / Out of Stock) needs a reorder-level convention this schema doesn't define yet - that'll be built out with the dedicated
+                  Products &amp; Inventory feature area.
+                </p>
               </div>
             </div>
           )}
@@ -217,7 +222,7 @@ export default function RuralMartDetailModal({ mart, onClose }) {
 
         <div className="pt-3 border-t border-brand-border/60 flex items-center justify-between text-xs">
           <span className="text-brand-text-muted">
-            Last Synced: <span className="font-mono text-brand-text">{mart.lastUpdated}</span>
+            Last Sale: <span className="font-mono text-brand-text">{formatDaysAgo(mart.daysSinceLastSale)}</span>
           </span>
 
           <button onClick={onClose} className="px-4 py-2 bg-brand-text text-white rounded-xl font-bold hover:bg-brand-primary-dark transition-colors">
