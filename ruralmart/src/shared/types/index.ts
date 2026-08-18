@@ -36,6 +36,7 @@ export interface AlertItem {
 }
 
 export interface RuralMartData {
+  dbId?: string;
   id: string;
   name: string;
   district: string;

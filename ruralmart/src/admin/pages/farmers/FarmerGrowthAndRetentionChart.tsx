@@ -9,14 +9,14 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { FARMER_GROWTH_TREND, CUSTOMER_RETENTION_DATA } from '../../../mockData';
+import { FarmerGrowthDataPoint, Theme } from '../../../shared/types';
 
 interface FarmerGrowthAndRetentionChartProps {
   theme: Theme;
+  data: FarmerGrowthDataPoint[];
 }
 
-export const FarmerGrowthAndRetentionChart: React.FC<FarmerGrowthAndRetentionChartProps> = ({ theme }) => {
+export const FarmerGrowthAndRetentionChart: React.FC<FarmerGrowthAndRetentionChartProps> = ({ theme, data }) => {
   const isDark = theme === 'dark';
   const gridColor = isDark ? '#1E3129' : '#DDE6E0';
   const textColor = isDark ? '#8E9E96' : '#66736C';
@@ -28,13 +28,7 @@ export const FarmerGrowthAndRetentionChart: React.FC<FarmerGrowthAndRetentionCha
   const retentionColor = isDark ? '#FBBF24' : '#D97706'; // Amber Gold for Retention %
 
   // Merge data sets by month period
-  const combinedData = FARMER_GROWTH_TREND.map((growth, idx) => {
-    const retention = CUSTOMER_RETENTION_DATA[idx];
-    return {
-      ...growth,
-      retentionRate: retention ? retention.retentionRate : 0,
-    };
-  });
+  const combinedData = data.map((growth) => ({ ...growth, retentionRate: growth.newFarmers + growth.repeatFarmers > 0 ? Math.round((growth.repeatFarmers / (growth.newFarmers + growth.repeatFarmers)) * 1000) / 10 : 0 }));
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {

@@ -9,16 +9,16 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { FINANCIAL_TREND_DATA } from '../../../mockData';
+import { FinancialTrendPoint, Theme } from '../../../shared/types';
 
 interface FinancialTrendChartProps {
   theme: Theme;
+  data: FinancialTrendPoint[];
 }
 
 type SelectedMetric = 'All' | 'Sales' | 'Procurement' | 'Gross Profit' | 'Net Profit';
 
-export const FinancialTrendChart: React.FC<FinancialTrendChartProps> = ({ theme }) => {
+export const FinancialTrendChart: React.FC<FinancialTrendChartProps> = ({ theme, data }) => {
   const [selectedMetric, setSelectedMetric] = useState<SelectedMetric>('All');
 
   const isDark = theme === 'dark';
@@ -85,7 +85,7 @@ export const FinancialTrendChart: React.FC<FinancialTrendChartProps> = ({ theme 
       {/* Chart Canvas */}
       <div className="w-full h-72 md:h-80 relative">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={FINANCIAL_TREND_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <LineChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
             <XAxis
               dataKey="period"

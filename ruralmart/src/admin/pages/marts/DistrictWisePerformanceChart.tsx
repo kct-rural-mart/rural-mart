@@ -9,20 +9,24 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { DISTRICT_PERFORMANCE_DATA } from '../../../mockData';
+import { RuralMartData, Theme } from '../../../shared/types';
 
 interface DistrictWisePerformanceChartProps {
   theme: Theme;
+  marts: RuralMartData[];
 }
 
-export const DistrictWisePerformanceChart: React.FC<DistrictWisePerformanceChartProps> = ({ theme }) => {
+export const DistrictWisePerformanceChart: React.FC<DistrictWisePerformanceChartProps> = ({ theme, marts }) => {
   const isDark = theme === 'dark';
   const gridColor = isDark ? '#1f3327' : '#e2e8f0';
   const textColor = isDark ? '#9ca3af' : '#64748b';
 
   const salesColor = isDark ? '#34d399' : '#059669'; // Emerald
   const scoreColor = isDark ? '#38bdf8' : '#0284c7'; // Sky
+  const districtData = Object.values(marts.reduce<Record<string, { district: string; martsCount: number; activeCount: number; scoreTotal: number; totalSalesLakhs: number; registeredFarmers: number }>>((groups, mart) => {
+    const group = groups[mart.district] ?? { district: mart.district, martsCount: 0, activeCount: 0, scoreTotal: 0, totalSalesLakhs: 0, registeredFarmers: 0 };
+    group.martsCount += 1; group.activeCount += mart.status === 'Active' ? 1 : 0; group.scoreTotal += mart.score; group.totalSalesLakhs += mart.salesRaw / 100_000; group.registeredFarmers += mart.registeredFarmers; groups[mart.district] = group; return groups;
+  }, {})).map((group) => ({ ...group, avgScore: group.martsCount ? Math.round(group.scoreTotal / group.martsCount) : 0 }));
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -65,7 +69,7 @@ export const DistrictWisePerformanceChart: React.FC<DistrictWisePerformanceChart
       {/* Canvas */}
       <div className="w-full h-72 md:h-80 relative">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={DISTRICT_PERFORMANCE_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <BarChart data={districtData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
             <XAxis
               dataKey="district"

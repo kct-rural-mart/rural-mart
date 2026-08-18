@@ -39,6 +39,14 @@ export const KpiCards: React.FC<KpiCardsProps> = ({ marts }) => {
     return `₹${(valRaw / 100000).toFixed(1)} L`;
   };
 
+  // Exact rupee display from Supabase; no lakh/crore conversion or rounding.
+  const formatExactCurrency = (value: number) => new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+
   const kpiData = [
     {
       id: 'kpi-total-marts',
@@ -63,7 +71,7 @@ export const KpiCards: React.FC<KpiCardsProps> = ({ marts }) => {
     {
       id: 'kpi-total-sales',
       label: 'Total Sales',
-      value: formatSalesDisplay(totalSalesRaw),
+      value: formatExactCurrency(totalSalesRaw),
       icon: TrendingUp,
       badge: '+12.4%',
       badgeClass: 'bg-[#E7F2EC] text-[#103A2B] dark:bg-[#1B3D30] dark:text-[#A3E6C5] border border-[#174F3A]/15 dark:border-[#A3E6C5]/20',
@@ -73,7 +81,7 @@ export const KpiCards: React.FC<KpiCardsProps> = ({ marts }) => {
     {
       id: 'kpi-gross-profit',
       label: 'Gross Profit',
-      value: formatProfitDisplay(totalProfitRaw),
+      value: formatExactCurrency(totalProfitRaw),
       icon: BarChart2,
       badge: '+8.7%',
       badgeClass: 'bg-[#E7F2EC] text-[#103A2B] dark:bg-[#1B3D30] dark:text-[#A3E6C5] border border-[#174F3A]/15 dark:border-[#A3E6C5]/20',

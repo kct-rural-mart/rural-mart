@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   TrendingUp,
   DollarSign,
@@ -21,15 +21,9 @@ import {
   Tooltip,
 } from 'recharts';
 import { getChartTheme } from '../../shared/theme';
-import {
-  getSalesByRuralMart,
-  getExpensesByRuralMart,
-  getProductsByRuralMart,
-  getOutreachByRuralMart,
-  getPurchasesByRuralMart,
-  procureProduct,
-} from '../../shared/dataServices';
 import { BillingPanel, BillingPanelHandle } from '../components/BillingPanel';
+import { getOwnerOverview, OwnerOverviewData } from '../services/overviewService';
+import { addOwnerProduct, recordOwnerProcurement } from '../services/productService';
 
 interface OwnerDashboardPageProps {
   currentMartId?: string | null;
@@ -64,6 +58,11 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({
 
   // State to force re-render/re-fetch after mutations
   const [refreshKey, setRefreshKey] = useState<number>(0);
+  const [overview, setOverview] = useState<OwnerOverviewData>({
+    salesRecords: [], expenseRecords: [], purchaseRecords: [], productRecords: [],
+    newFarmerLeads: 0, totalFarmersReached: 0, convertedFarmers: 0,
+  });
+  const [overviewError, setOverviewError] = useState('');
 
   // Quick Action Modal States
   const [isDailySalesModalOpen, setIsDailySalesModalOpen] = useState(false);
@@ -90,12 +89,21 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({
   const [procSellingPrice, setProcSellingPrice] = useState<string>('');
   const [procError, setProcError] = useState<string>('');
 
-  // Compute metrics dynamically from shared data
-  const salesRecords = useMemo(() => getSalesByRuralMart(ruralMartId), [ruralMartId, refreshKey]);
-  const expenseRecords = useMemo(() => getExpensesByRuralMart(ruralMartId), [ruralMartId, refreshKey]);
-  const purchaseRecords = useMemo(() => getPurchasesByRuralMart(ruralMartId), [ruralMartId, refreshKey]);
-  const productRecords = useMemo(() => getProductsByRuralMart(ruralMartId), [ruralMartId, refreshKey]);
-  const outreachRecords = useMemo(() => getOutreachByRuralMart(ruralMartId), [ruralMartId, refreshKey]);
+  useEffect(() => {
+    let active = true;
+    setOverviewError('');
+    void getOwnerOverview(ruralMartId)
+      .then((data) => { if (active) setOverview(data); })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setOverviewError(error && typeof error === 'object' && 'message' in error
+          ? String((error as { message: unknown }).message)
+          : 'Unable to load dashboard data.');
+      });
+    return () => { active = false; };
+  }, [ruralMartId, refreshKey]);
+
+  const { salesRecords, expenseRecords, purchaseRecords, productRecords } = overview;
 
   const totalSalesVal = useMemo(() => salesRecords.reduce((acc, curr) => acc + (curr.amount || 0), 0), [salesRecords]);
   const totalProcurementVal = useMemo(() => purchaseRecords.reduce((acc, curr) => acc + (curr.amount || 0), 0), [purchaseRecords]);
@@ -111,16 +119,11 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({
     return { name: sorted[0].name || 'No product data', units: sorted[0].salesQty || 0 };
   }, [productRecords]);
 
-  const newFarmerLeads = useMemo(() => {
-    return outreachRecords.reduce((acc, curr: any) => acc + (curr.newLeads || 0), 0);
-  }, [outreachRecords]);
+  const newFarmerLeads = overview.newFarmerLeads;
+  const totalFarmersReached = overview.totalFarmersReached;
 
-  const totalFarmersReached = useMemo(() => {
-    return outreachRecords.reduce((acc, curr: any) => acc + (curr.farmersReached || curr.attended || 0), 0);
-  }, [outreachRecords]);
-
-  const conversionRateStr = totalFarmersReached > 0
-    ? `${((newFarmerLeads / totalFarmersReached) * 100).toFixed(1)}%`
+  const conversionRateStr = newFarmerLeads > 0
+    ? `${((overview.convertedFarmers / newFarmerLeads) * 100).toFixed(1)}%`
     : '0%';
 
   const weeklyChartData: WeeklyDataItem[] = useMemo(() => {
@@ -192,7 +195,7 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({
     }
   };
 
-  const handleSaveProcurement = (e: React.FormEvent) => {
+  const handleSaveProcurement = async (e: React.FormEvent) => {
     e.preventDefault();
     setProcError('');
 
@@ -217,15 +220,35 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({
       return;
     }
 
-    procureProduct(ruralMartId, {
-      productName: cleanName,
-      category: procCategory,
-      supplier: procSupplier,
-      quantity: numQty,
-      costPrice: numCostPrice,
-      sellingPrice: numSellingPrice,
-      unit: procUnit,
-    });
+    try {
+      if (procureMode === 'NEW') {
+        const allowedCategories = ['Farm Equipment', 'Feed', 'Mineral Mixtures', 'Fodder Seeds', 'Veterinary Medicines', 'Seeds', 'Fertilizers', 'Other'];
+        await addOwnerProduct({
+          ruralMartId,
+          name: cleanName,
+          category: allowedCategories.includes(procCategory) ? procCategory : 'Other',
+          supplier: procSupplier,
+          openingQuantity: numQty,
+          purchasePrice: numCostPrice,
+          sellingPrice: numSellingPrice,
+          unit: procUnit,
+        });
+      } else {
+        if (!selectedProcureProductId) throw new Error('Please select a product.');
+        await recordOwnerProcurement({
+          ruralMartId,
+          productId: selectedProcureProductId,
+          quantity: numQty,
+          pricePerUnit: numCostPrice,
+          supplier: procSupplier,
+        });
+      }
+    } catch (error) {
+      setProcError(error && typeof error === 'object' && 'message' in error
+        ? String((error as { message: unknown }).message)
+        : 'Unable to save procurement.');
+      return;
+    }
 
     setRefreshKey((k) => k + 1);
     setIsProcurementModalOpen(false);
@@ -265,6 +288,11 @@ export const OwnerDashboardPage: React.FC<OwnerDashboardPageProps> = ({
 
   return (
     <div className="space-y-4">
+      {overviewError && (
+        <div className="p-3.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold">
+          {overviewError}
+        </div>
+      )}
       {/* Toast Notification */}
       {toastMsg && (
         <div className="p-3.5 rounded-xl bg-[#174F3A] text-white text-xs font-bold shadow-lg border border-emerald-500/30 flex items-center justify-between animate-fade-in transition-all">

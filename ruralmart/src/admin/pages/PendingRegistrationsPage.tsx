@@ -21,16 +21,29 @@ import {
 } from 'lucide-react';
 import { Theme, MartRegistrationFormData } from '../../shared/types';
 import {
-  getApplications,
   RegistrationApplication,
-  approveApplication,
-  rejectApplication,
   StoredRuralMart,
   StoredOwnerAccount,
 } from '../../lib/storageService';
+import {
+  approveRegistrationApplication,
+  getRegistrationApplications,
+  rejectRegistrationApplication,
+} from '../services/registrationService';
 interface PendingRegistrationsPageProps {
   theme: 'light' | 'dark';
   onUpdatePendingCount?: () => void;
+}
+
+function readableError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const value = error as { message?: string; details?: string; hint?: string; code?: string };
+    return [value.message, value.details, value.hint, value.code ? `Code: ${value.code}` : '']
+      .filter(Boolean)
+      .join(' — ');
+  }
+  return 'Unable to load registrations.';
 }
 
 export const PendingRegistrationsPage: React.FC<PendingRegistrationsPageProps> = ({
@@ -58,16 +71,20 @@ export const PendingRegistrationsPage: React.FC<PendingRegistrationsPageProps> =
     temporaryPassword: string;
   } | null>(null);
   const [copiedCredentials, setCopiedCredentials] = useState(false);
+  const [actionError, setActionError] = useState('');
 
-  // Load applications from localStorage
-  const refreshApplications = () => {
-    const data = getApplications();
-    setApplications(data);
-    if (onUpdatePendingCount) onUpdatePendingCount();
+  const refreshApplications = async () => {
+    try {
+      setActionError('');
+      setApplications(await getRegistrationApplications());
+      onUpdatePendingCount?.();
+    } catch (error) {
+      setActionError(readableError(error));
+    }
   };
 
   useEffect(() => {
-    refreshApplications();
+    void refreshApplications();
   }, []);
 
   const districts = ['All', 'Erode', 'Coimbatore', 'Tiruppur', 'Salem', 'Madurai'];
@@ -96,30 +113,32 @@ export const PendingRegistrationsPage: React.FC<PendingRegistrationsPageProps> =
     setShowReviewModal(true);
   };
 
-  const handleConfirmApproval = () => {
+  const handleConfirmApproval = async () => {
     if (!selectedApp) return;
     try {
-      const result = approveApplication(selectedApp.applicationId);
+      setActionError('');
+      const result = await approveRegistrationApplication(selectedApp);
       setShowApproveConfirmModal(false);
       setShowReviewModal(false);
       setApprovalResult(result);
-      refreshApplications();
+      await refreshApplications();
     } catch (e) {
-      console.error('Failed to approve application:', e);
+      setActionError(e instanceof Error ? e.message : 'Failed to approve the application.');
     }
   };
 
-  const handleConfirmRejection = () => {
+  const handleConfirmRejection = async () => {
     if (!selectedApp) return;
     try {
-      rejectApplication(selectedApp.applicationId, rejectionReasonInput);
+      setActionError('');
+      await rejectRegistrationApplication(selectedApp.applicationId, rejectionReasonInput);
       setShowRejectModal(false);
       setShowReviewModal(false);
       setRejectionReasonInput('');
       setSelectedApp(null);
-      refreshApplications();
+      await refreshApplications();
     } catch (e) {
-      console.error('Failed to reject application:', e);
+      setActionError(e instanceof Error ? e.message : 'Failed to reject the application.');
     }
   };
 
@@ -133,6 +152,11 @@ export const PendingRegistrationsPage: React.FC<PendingRegistrationsPageProps> =
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-sm">
+          {actionError}
+        </div>
+      )}
       
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-[#121E19] p-5 rounded-2xl border border-[#DDE6E0] dark:border-[#1E3129] shadow-xs">

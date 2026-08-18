@@ -9,14 +9,14 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { REVENUE_OPEX_DATA } from '../../../mockData';
+import { RevenueOpexPoint, Theme } from '../../../shared/types';
 
 interface RevenueVsOpexChartProps {
   theme: Theme;
+  data: RevenueOpexPoint[];
 }
 
-export const RevenueVsOpexChart: React.FC<RevenueVsOpexChartProps> = ({ theme }) => {
+export const RevenueVsOpexChart: React.FC<RevenueVsOpexChartProps> = ({ theme, data }) => {
   const isDark = theme === 'dark';
   const gridColor = isDark ? '#1E3129' : '#DDE6E0';
   const textColor = isDark ? '#8E9E96' : '#66736C';
@@ -76,7 +76,7 @@ export const RevenueVsOpexChart: React.FC<RevenueVsOpexChartProps> = ({ theme })
       {/* Chart Canvas */}
       <div className="w-full h-72 md:h-80 relative">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={REVENUE_OPEX_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <BarChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
             <XAxis
               dataKey="period"

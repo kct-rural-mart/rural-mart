@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   X,
   Download,
@@ -26,7 +26,7 @@ import {
   GraduationCap,
 } from 'lucide-react';
 import { RuralMartData } from '../../../shared/types';
-import { getIndividualMartReportData, IndividualMartReportData } from '../../../shared/dataServices';
+import { getLiveIndividualReport, LiveIndividualReport } from '../../services/reportsService';
 
 export interface ReportConfig {
   scope: 'individual' | 'overall';
@@ -84,17 +84,21 @@ export const ReportPreviewModal: React.FC<ReportPreviewModalProps> = ({
   // so the individual Rural Mart report can reuse the same centralized, real-data calculation
   // service (getIndividualMartReportData) — never a second/duplicate data layer.
   const isIndividualScope = config?.scope === 'individual';
-  const individualMartId = config?.mart?.id || '';
+  const individualMartId = config?.mart?.dbId || '';
 
   const { start: periodStart, end: periodEnd } = useMemo(
     () => getPeriodBounds(dateRange),
     [dateRange]
   );
 
-  const individualReportData: IndividualMartReportData | null = useMemo(() => {
-    if (!isIndividualScope || !individualMartId) return null;
-    return getIndividualMartReportData(individualMartId, periodStart, periodEnd);
-  }, [isIndividualScope, individualMartId, periodStart, periodEnd]);
+  const [individualReportData, setIndividualReportData] = useState<LiveIndividualReport | null>(null);
+  useEffect(() => {
+    let active = true;
+    if (!isIndividualScope || !individualMartId) { setIndividualReportData(null); return () => { active = false; }; }
+    const start = periodStart?.toISOString().slice(0, 10); const end = periodEnd?.toISOString().slice(0, 10);
+    void getLiveIndividualReport(individualMartId, start, end).then((data) => { if (active) setIndividualReportData(data); }).catch(() => { if (active) setIndividualReportData(null); });
+    return () => { active = false; };
+  }, [individualMartId, isIndividualScope, periodEnd, periodStart]);
 
   if (!config) return null;
 

@@ -13,15 +13,15 @@ import {
   Receipt,
   ShoppingBag,
 } from 'lucide-react';
-import {
-  getFarmersByRuralMart,
-  saveFarmer,
-  updateFarmer,
-  getProductsByRuralMart,
-  recordCustomerBill,
-  BillLineItem,
-} from '../../shared/dataServices';
+import { BillLineItem } from '../../shared/dataServices';
 import { CanonicalProduct, CanonicalFarmer } from '../../shared/types/storage';
+import {
+  addBillingFarmer,
+  getBillingFarmers,
+  getBillingProducts,
+  recordBillingSale,
+  updateBillingFarmer,
+} from '../services/billingService';
 
 // This panel is the SINGLE reusable "Farmer Purchase & Bill Entry" billing experience.
 // It is rendered on Page 2 (Daily Business) and inside the Page 1 (Overall Dashboard)
@@ -58,9 +58,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     const [localRefresh, setLocalRefresh] = useState<number>(0);
     const bumpLocal = () => setLocalRefresh((k) => k + 1);
 
-    const catalogProducts = useMemo(() => {
-      return getProductsByRuralMart(ruralMartId);
-    }, [ruralMartId, refreshKey, localRefresh]);
+    const [catalogProducts, setCatalogProducts] = useState<CanonicalProduct[]>([]);
 
     // --- FARMER LOOKUP & CUSTOMER STATE ---
     const [farmerTab, setFarmerTab] = useState<'existing' | 'new'>('existing');
@@ -74,9 +72,24 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     const [farmerUpdateMsg, setFarmerUpdateMsg] = useState<string>('');
 
     // All registered farmers for customer selection/search
-    const allRegisteredFarmers = useMemo(() => {
-      return getFarmersByRuralMart(ruralMartId);
-    }, [ruralMartId, refreshKey, localRefresh, matchedFarmer]);
+    const [allRegisteredFarmers, setAllRegisteredFarmers] = useState<CanonicalFarmer[]>([]);
+
+    useEffect(() => {
+      let active = true;
+      if (!ruralMartId) return;
+      void Promise.all([getBillingProducts(ruralMartId), getBillingFarmers(ruralMartId)])
+        .then(([products, farmers]) => {
+          if (!active) return;
+          setCatalogProducts(products);
+          setAllRegisteredFarmers(farmers);
+        })
+        .catch((error: unknown) => {
+          if (active) setBillError(error instanceof Error ? error.message : 'Unable to load billing data.');
+        });
+      return () => {
+        active = false;
+      };
+    }, [localRefresh, refreshKey, ruralMartId]);
 
     // Live search results (Google-like autocomplete) — filters by name, mobile, Farmer ID, farmerCode
     const liveSearchResults = useMemo(() => {
@@ -96,6 +109,12 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
         );
       });
     }, [farmerSearchInput, allRegisteredFarmers]);
+
+    const searchedMobile = farmerSearchInput.replace(/\D/g, '').slice(-10);
+    const isCompleteMobileSearch = searchedMobile.length === 10;
+    const exactMobileMatch = isCompleteMobileSearch
+      ? allRegisteredFarmers.find((farmer) => farmer.phone.replace(/\D/g, '').slice(-10) === searchedMobile) ?? null
+      : null;
 
     // Notify parent whenever the attached customer changes
     useEffect(() => {
@@ -232,7 +251,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     };
 
     // Generate Customer Bill & Complete Transaction
-    const handleGenerateBill = (e: React.FormEvent) => {
+    const handleGenerateBill = async (e: React.FormEvent) => {
       e.preventDefault();
       setBillError('');
       setBillSuccessMsg('');
@@ -247,20 +266,20 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
         return;
       }
 
-      const result = recordCustomerBill(ruralMartId, {
-        farmerId: matchedFarmer.id,
-        farmerName: matchedFarmer.name,
-        paymentMethod,
-        lineItems: billDraftItems,
-      });
-
-      if (!result.success) {
-        setBillError(result.errorMessage || 'Failed to complete bill transaction.');
+      let result: { billNumber: string; totalAmount: number };
+      try {
+        result = await recordBillingSale({
+          ruralMartId,
+          farmerId: matchedFarmer.id,
+          items: billDraftItems.map((item) => ({ productId: item.productId, quantity: item.quantity, unitPrice: item.unitPrice })),
+        });
+      } catch (error) {
+        setBillError(error instanceof Error ? error.message : 'Failed to complete bill transaction.');
         return;
       }
 
       const billAmount = totalBillAmount;
-      const billNumber = result.billNumber || '';
+      const billNumber = result.billNumber;
       const customerName = matchedFarmer.name;
 
       // Success!
@@ -336,7 +355,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       setEditFarmerVillage(matchedFarmer.village);
     };
 
-    const handleSaveChangesFarmer = (e: React.FormEvent) => {
+    const handleSaveChangesFarmer = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!matchedFarmer) return;
 
@@ -345,11 +364,12 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       const updatedCount = Number(editCattleCount) || 0;
 
       if (matchedFarmer.id) {
-        updateFarmer(matchedFarmer.id, {
-          name: updatedName,
-          village: updatedVillage,
-          animalHeadCount: updatedCount,
-        });
+        try {
+          await updateBillingFarmer(matchedFarmer.id, { name: updatedName, village: updatedVillage, cattleCount: updatedCount });
+        } catch (error) {
+          setFarmerUpdateMsg(error instanceof Error ? error.message : 'Unable to update the customer.');
+          return;
+        }
       }
 
       setMatchedFarmer((prev: any) => ({
@@ -369,7 +389,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     };
 
     // New Customer Registration
-    const handleSaveNewCustomer = (e: React.FormEvent) => {
+    const handleSaveNewCustomer = async (e: React.FormEvent) => {
       e.preventDefault();
       const errors: Record<string, string> = {};
 
@@ -395,11 +415,18 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       const otherLivestockCount = Number(numOtherLivestock) || 0;
       const totalAnimals = cattleCount + otherLivestockCount;
 
-      const newFarmerId = `FMR-${1040 + Math.floor(Math.random() * 8000)}`;
+      let savedFarmer;
+      try {
+        savedFarmer = await addBillingFarmer({ ruralMartId, name: newName.trim(), mobile: cleanMobile, village: newVillage.trim(), cattleCount: totalAnimals });
+      } catch (error) {
+        setNewCustomerErrors({ form: error instanceof Error ? error.message : 'Unable to register the customer.' });
+        return;
+      }
+      const newFarmerId = savedFarmer.id;
 
       const farmerRecord: CanonicalFarmer = {
         id: newFarmerId,
-        farmerCode: newFarmerId,
+        farmerCode: savedFarmer.farmer_code,
         ruralMartId,
         name: newName.trim(),
         phone: cleanMobile.startsWith('+91') ? cleanMobile : `+91 ${cleanMobile}`,
@@ -419,8 +446,6 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
         totalPurchasesVal: 0,
         joinedDate: currentFormattedDate,
       };
-
-      saveFarmer(farmerRecord);
 
       const createdFarmer = {
         ...farmerRecord,
@@ -680,6 +705,18 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                       className="w-full h-9 pl-8 pr-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
                     />
                   </div>
+
+                  {isCompleteMobileSearch && (
+                    <div className={`p-2.5 rounded-xl border text-xs font-semibold ${
+                      exactMobileMatch
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300'
+                        : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300'
+                    }`}>
+                      {exactMobileMatch
+                        ? `Existing farmer found: ${exactMobileMatch.name}. Select the record below to attach it to this bill.`
+                        : 'This mobile number is not registered for your Rural Mart. Use “Register New Customer” to add the farmer.'}
+                    </div>
+                  )}
 
                   {/* Live Search Results */}
                   {farmerSearchInput.trim() && (

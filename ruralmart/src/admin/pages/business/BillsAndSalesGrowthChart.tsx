@@ -10,14 +10,14 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { BILLS_GROWTH_DATA } from '../../../mockData';
+import { BillsGrowthPoint, Theme } from '../../../shared/types';
 
 interface BillsAndSalesGrowthChartProps {
   theme: Theme;
+  data: BillsGrowthPoint[];
 }
 
-export const BillsAndSalesGrowthChart: React.FC<BillsAndSalesGrowthChartProps> = ({ theme }) => {
+export const BillsAndSalesGrowthChart: React.FC<BillsAndSalesGrowthChartProps> = ({ theme, data }) => {
   const isDark = theme === 'dark';
   const gridColor = isDark ? '#1E3129' : '#DDE6E0';
   const textColor = isDark ? '#8E9E96' : '#66736C';
@@ -73,7 +73,7 @@ export const BillsAndSalesGrowthChart: React.FC<BillsAndSalesGrowthChartProps> =
       {/* Canvas */}
       <div className="w-full h-72 md:h-80 relative">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={BILLS_GROWTH_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <ComposedChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
             <XAxis
               dataKey="period"

@@ -21,8 +21,14 @@ import {
   Tooltip,
 } from 'recharts';
 import { getChartTheme } from '../../shared/theme';
-import { getProductsByRuralMart, saveProduct, updateProduct, deleteProduct, procureProduct } from '../../shared/dataServices';
-import { CanonicalProduct } from '../../shared/types/storage';
+import {
+  addOwnerProduct,
+  deleteOwnerProduct,
+  getOwnerProducts,
+  PRODUCT_CATEGORIES,
+  recordOwnerProcurement,
+  updateOwnerProduct,
+} from '../services/productService';
 
 interface ProductInventoryPageProps {
   currentMartId?: string | null;
@@ -50,16 +56,7 @@ export interface CatalogProduct {
   isLowStock?: boolean;
 }
 
-const CATEGORY_SUGGESTIONS = [
-  'Feed',
-  'Minerals',
-  'Organic Fertilizers',
-  'Seeds',
-  'Bio-inputs',
-  'Equip',
-  'Groceries',
-  'Others',
-];
+const CATEGORY_SUGGESTIONS: string[] = [...PRODUCT_CATEGORIES];
 
 const UNIT_OPTIONS = [
   'kg',
@@ -85,46 +82,20 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
   // Load Products from canonical store
   const [products, setProducts] = useState<CatalogProduct[]>([]);
 
-  const loadProductsFromStore = () => {
-    const canonical = getProductsByRuralMart(ruralMartId);
-    if (canonical && canonical.length > 0) {
-      setProducts(
-        canonical.map((cp) => {
-          const cost = cp.costPrice ?? cp.procurementPricePerUnit ?? 0;
-          const sell = cp.sellingPrice ?? cp.sellingPricePerUnit ?? 0;
-          const stock = cp.stockQty ?? cp.currentStockQuantity ?? 0;
-          const pQty = cp.procurementQty ?? cp.procurementQuantity ?? 0;
-          const pVal = cp.procurementValue ?? pQty * cost;
-          const sQty = cp.salesQty ?? cp.salesQuantity ?? 0;
-          const sVal = cp.salesValue ?? 0;
-          const oStock = cp.openingStockQty ?? cp.openingStockQuantity ?? (stock - pQty + sQty);
-
-          return {
-            id: cp.id,
-            code: cp.code,
-            name: cp.name || cp.productName || '',
-            category: cp.category || 'General',
-            supplier: cp.supplier || cp.supplierName || '',
-            price: sell,
-            costPrice: cost,
-            stockQty: stock,
-            unit: cp.unit || 'units',
-            procurementQty: pQty,
-            procurementValue: pVal,
-            openingStockQty: oStock,
-            salesQty: sQty,
-            salesValue: sVal,
-            isLowStock: cp.status === 'Low Stock' || stock <= (cp.reorderLevel || 35),
-          };
-        })
-      );
-    } else {
+  const loadProductsFromStore = async () => {
+    if (!ruralMartId) {
       setProducts([]);
+      return;
+    }
+    try {
+      setProducts(await getOwnerProducts(ruralMartId));
+    } catch (error) {
+      triggerToast(error instanceof Error ? error.message : 'Unable to load products.');
     }
   };
 
   useEffect(() => {
-    loadProductsFromStore();
+    void loadProductsFromStore();
   }, [ruralMartId]);
 
   const [tableSearch, setTableSearch] = useState<string>('');
@@ -191,12 +162,16 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
   const [viewProductItem, setViewProductItem] = useState<CatalogProduct | null>(null);
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<CatalogProduct | null>(null);
 
-  const handleConfirmDeleteProduct = () => {
+  const handleConfirmDeleteProduct = async () => {
     if (!deleteConfirmItem) return;
-    deleteProduct(deleteConfirmItem.id);
-    loadProductsFromStore();
-    triggerToast(`Product "${deleteConfirmItem.name}" removed from active catalog. Historical records preserved.`);
-    setDeleteConfirmItem(null);
+    try {
+      await deleteOwnerProduct(deleteConfirmItem.id);
+      await loadProductsFromStore();
+      triggerToast(`Product "${deleteConfirmItem.name}" removed from the catalog.`);
+      setDeleteConfirmItem(null);
+    } catch (error) {
+      triggerToast(error instanceof Error ? error.message : 'Unable to remove the product.');
+    }
   };
 
   // --- MODAL 1: ADD NEW CATALOG PRODUCT FORM STATE ---
@@ -217,14 +192,14 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
   const calculatedProcurementValue = numProcQty * numProcPrice;
 
   // Submit Add New Product
-  const handleAddProductSubmit = (e: React.FormEvent) => {
+  const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!addName.trim()) return;
 
     const sellPrice = Math.max(0, Number(addSellingPrice) || 0);
     const finalCategory =
       addCategorySelect === 'CUSTOM'
-        ? addCustomCategory.trim() || 'General'
+        ? 'Other'
         : addCategorySelect;
     const finalUnit =
       addUnitSelect === 'CUSTOM'
@@ -232,44 +207,8 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
         : addUnitSelect;
     const supplierVal = addSupplier.trim();
 
-    const newPrdCode = `PRD-${String(products.length + 1001).padStart(4, '0')}`;
-    const newPrdId = `prd-${Date.now()}`;
-
-    const newCanonicalProduct: CanonicalProduct = {
-      id: newPrdId,
-      ruralMartId,
-      code: newPrdCode,
-      name: addName.trim(),
-      productName: addName.trim(),
-      category: finalCategory,
-      district: 'Local',
-      supplier: supplierVal,
-      supplierName: supplierVal,
-      unit: finalUnit,
-      procurementQty: numProcQty,
-      procurementQuantity: numProcQty,
-      costPrice: numProcPrice,
-      procurementPricePerUnit: numProcPrice,
-      procurementValue: calculatedProcurementValue,
-      sellingPrice: sellPrice,
-      sellingPricePerUnit: sellPrice,
-      openingStockQty: numProcQty,
-      openingStockQuantity: numProcQty,
-      stockQty: numProcQty,
-      currentStockQuantity: numProcQty,
-      salesQty: 0,
-      salesQuantity: 0,
-      salesValue: 0,
-      reorderLevel: 35,
-      status: numProcQty === 0 ? 'Out of Stock' : numProcQty <= 35 ? 'Low Stock' : 'Healthy',
-      lastRestocked: 'Today',
-      inventoryValue: numProcQty * sellPrice,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    saveProduct(newCanonicalProduct);
-    loadProductsFromStore();
+    await addOwnerProduct({ ruralMartId, name: addName.trim(), category: finalCategory, unit: finalUnit, purchasePrice: numProcPrice, sellingPrice: sellPrice, openingQuantity: numProcQty, supplier: supplierVal });
+    await loadProductsFromStore();
     setIsAddProductOpen(false);
 
     triggerToast(`"${addName.trim()}" added to inventory catalog!`);
@@ -323,7 +262,7 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
     setIsEditModalOpen(true);
   };
 
-  const handleEditProductSubmit = (e: React.FormEvent) => {
+  const handleEditProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
 
@@ -331,7 +270,7 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
     const updatedName = editName.trim() || editingProduct.name;
     const finalCategory =
       editCategorySelect === 'CUSTOM'
-        ? editCustomCategory.trim() || editingProduct.category
+        ? 'Other'
         : editCategorySelect;
     const finalUnit =
       editUnitSelect === 'CUSTOM'
@@ -339,20 +278,8 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
         : editUnitSelect;
     const updatedSupplier = editSupplier.trim();
 
-    updateProduct(editingProduct.id, {
-      name: updatedName,
-      productName: updatedName,
-      category: finalCategory,
-      supplier: updatedSupplier,
-      supplierName: updatedSupplier,
-      unit: finalUnit,
-      sellingPrice: sellPrice,
-      sellingPricePerUnit: sellPrice,
-      inventoryValue: editingProduct.stockQty * sellPrice,
-      updatedAt: new Date().toISOString(),
-    });
-
-    loadProductsFromStore();
+    await updateOwnerProduct(editingProduct.id, { name: updatedName, category: finalCategory, unit: finalUnit, sellingPrice: sellPrice });
+    await loadProductsFromStore();
     setIsEditModalOpen(false);
     setEditingProduct(null);
     triggerToast(`"${updatedName}" updated successfully.`);
@@ -371,7 +298,7 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
     setIsRestockOpen(true);
   };
 
-  const handleRestockSubmit = (e: React.FormEvent) => {
+  const handleRestockSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!restockProductItem) return;
 
@@ -379,17 +306,8 @@ export const ProductInventoryPage: React.FC<ProductInventoryPageProps> = ({
     const addCost = Math.max(0, Number(restockPricePerUnit) || 0);
     if (addQty === 0) return;
 
-    procureProduct(ruralMartId, {
-      productName: restockProductItem.name,
-      category: restockProductItem.category,
-      unit: restockProductItem.unit,
-      quantity: addQty,
-      costPrice: addCost > 0 ? addCost : restockProductItem.costPrice,
-      sellingPrice: restockProductItem.price,
-      supplier: restockProductItem.supplier,
-    });
-
-    loadProductsFromStore();
+    await recordOwnerProcurement({ ruralMartId, productId: restockProductItem.id, quantity: addQty, pricePerUnit: addCost > 0 ? addCost : restockProductItem.costPrice, supplier: restockProductItem.supplier });
+    await loadProductsFromStore();
     setIsRestockOpen(false);
     setRestockProductItem(null);
     triggerToast(`Procured +${addQty} ${restockProductItem.unit} of "${restockProductItem.name}". Opening Stock unchanged, Closing Stock updated.`);

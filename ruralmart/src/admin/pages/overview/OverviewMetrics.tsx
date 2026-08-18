@@ -12,13 +12,7 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { RuralMartData } from '../../../shared/types';
-import {
-  getReportsRuralMarts,
-  getFinancialRecords,
-  getFarmerOutreachMarts,
-  getOutreachPrograms,
-  getAlerts,
-} from '../../../shared/dataServices';
+import { getAlerts } from '../../../shared/dataServices';
 
 interface OverviewMetricsProps {
   dateRange?: string;
@@ -29,16 +23,19 @@ export const OverviewMetrics: React.FC<OverviewMetricsProps> = ({
   dateRange = 'Last 30 Days',
   marts,
 }) => {
-  const activeMarts = marts && marts.length > 0 ? marts : getReportsRuralMarts();
-  const financials = getFinancialRecords();
-  const outreachMarts = getFarmerOutreachMarts();
-  const outreachPrograms = getOutreachPrograms();
+  const activeMarts = marts ?? [];
+  type LiveOverviewMart = RuralMartData & {
+    totalBills?: number; outreachPrograms?: number; villagesCovered?: number;
+    animalPopulationCovered?: number; medicalCamps?: number; newFarmers?: number;
+    salesGrowthPercent?: number;
+  };
+  const liveMarts = activeMarts as LiveOverviewMart[];
   const alerts = getAlerts();
 
   // 1. Footfall, Bills, Programs, Alerts
   const footfall = activeMarts.reduce((sum, m) => sum + (m.farmerFootfall || 0), 0);
-  const billsCount = financials.reduce((sum, f) => sum + (f.totalBills || 0), 0);
-  const programsCount = outreachPrograms.length;
+  const billsCount = liveMarts.reduce((sum, mart) => sum + (mart.totalBills || 0), 0);
+  const programsCount = liveMarts.reduce((sum, mart) => sum + (mart.outreachPrograms || 0), 0);
   const activeAlertsCount = alerts.filter((a) => a.status !== 'Resolved').length;
 
   // 2. Highlights
@@ -48,16 +45,16 @@ export const OverviewMetrics: React.FC<OverviewMetricsProps> = ({
   const sortedOutreach = [...activeMarts].filter((m) => m.farmersReached > 0).sort((a, b) => b.farmersReached - a.farmersReached);
   const highestOutreachMart = sortedOutreach[0];
 
-  const sortedGrowth = [...financials].filter((f) => (f.salesGrowthPercent || 0) > 0).sort(
+  const sortedGrowth = [...liveMarts].filter((f) => (f.salesGrowthPercent || 0) > 0).sort(
     (a, b) => (b.salesGrowthPercent || 0) - (a.salesGrowthPercent || 0)
   );
   const fastestMartRecord = sortedGrowth[0];
 
   // 3. Impact Snapshot
-  const villages = outreachMarts.reduce((sum, m) => sum + (m.villagesCovered || 0), 0);
-  const cattle = outreachMarts.reduce((sum, m) => sum + (m.animalPopulationCovered || 0), 0);
-  const camps = outreachMarts.reduce((sum, m) => sum + ((m as any).medicalCamps || 0), 0);
-  const converted = outreachMarts.reduce((sum, m) => sum + (m.newFarmers || 0), 0);
+  const villages = liveMarts.reduce((sum, m) => sum + (m.villagesCovered || 0), 0);
+  const cattle = liveMarts.reduce((sum, m) => sum + (m.animalPopulationCovered || 0), 0);
+  const camps = liveMarts.reduce((sum, m) => sum + (m.medicalCamps || 0), 0);
+  const converted = liveMarts.reduce((sum, m) => sum + (m.newFarmers || 0), 0);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

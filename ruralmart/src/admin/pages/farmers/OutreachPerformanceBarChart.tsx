@@ -9,14 +9,14 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { OUTREACH_PERFORMANCE_DATA } from '../../../mockData';
+import { OutreachPerformanceDataPoint, Theme } from '../../../shared/types';
 
 interface OutreachPerformanceBarChartProps {
   theme: Theme;
+  data: OutreachPerformanceDataPoint[];
 }
 
-export const OutreachPerformanceBarChart: React.FC<OutreachPerformanceBarChartProps> = ({ theme }) => {
+export const OutreachPerformanceBarChart: React.FC<OutreachPerformanceBarChartProps> = ({ theme, data }) => {
   const isDark = theme === 'dark';
   const gridColor = isDark ? '#1E3129' : '#DDE6E0';
   const textColor = isDark ? '#8E9E96' : '#66736C';
@@ -76,7 +76,7 @@ export const OutreachPerformanceBarChart: React.FC<OutreachPerformanceBarChartPr
       {/* Canvas */}
       <div className="w-full h-72 md:h-80 relative">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={OUTREACH_PERFORMANCE_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <BarChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
             <XAxis
               dataKey="period"

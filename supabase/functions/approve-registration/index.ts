@@ -3,7 +3,7 @@ import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts'
 
 // Comma-separated list of origins allowed to call this function (ALLOWED_ORIGINS secret).
 // Mirrors backend/src/main/resources/application.properties' app.cors.allowed-origins.
-const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:5173']
+const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000']
 
 function getAllowedOrigins(): string[] {
   const raw = Deno.env.get('ALLOWED_ORIGINS')
@@ -30,9 +30,11 @@ function json(body: unknown, status: number, requestOrigin: string | null) {
 
 const REFERENCE_CODE_PREFIX = 'RM'
 const TEMP_PASSWORD_LENGTH = 12
-// Same charset as backend/.../RegistrationApprovalService.java's PASSWORD_CHARS -
-// unambiguous letters/digits (no 0/O/1/I/l) plus a few symbols.
-const TEMP_PASSWORD_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%'
+const PASSWORD_UPPERCASE = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+const PASSWORD_LOWERCASE = 'abcdefghijkmnopqrstuvwxyz'
+const PASSWORD_DIGITS = '23456789'
+const PASSWORD_SYMBOLS = '!@#$%'
+const TEMP_PASSWORD_CHARS = `${PASSWORD_UPPERCASE}${PASSWORD_LOWERCASE}${PASSWORD_DIGITS}${PASSWORD_SYMBOLS}`
 
 type AdminClient = ReturnType<typeof createClient>
 
@@ -55,13 +57,29 @@ async function generateReferenceCode(admin: AdminClient): Promise<string> {
 }
 
 function generateTempPassword(): string {
-  const randomValues = new Uint32Array(TEMP_PASSWORD_LENGTH)
-  crypto.getRandomValues(randomValues)
-  let password = ''
-  for (let i = 0; i < TEMP_PASSWORD_LENGTH; i++) {
-    password += TEMP_PASSWORD_CHARS[randomValues[i] % TEMP_PASSWORD_CHARS.length]
+  const pick = (characters: string) => {
+    const value = new Uint32Array(1)
+    crypto.getRandomValues(value)
+    return characters[value[0] % characters.length]
   }
-  return password
+
+  // Guarantee compliance with projects that require every character class.
+  const password = [
+    pick(PASSWORD_UPPERCASE),
+    pick(PASSWORD_LOWERCASE),
+    pick(PASSWORD_DIGITS),
+    pick(PASSWORD_SYMBOLS),
+  ]
+  while (password.length < TEMP_PASSWORD_LENGTH) password.push(pick(TEMP_PASSWORD_CHARS))
+
+  // Cryptographically shuffle so the required characters are not predictable.
+  for (let index = password.length - 1; index > 0; index--) {
+    const random = new Uint32Array(1)
+    crypto.getRandomValues(random)
+    const swapIndex = random[0] % (index + 1)
+    ;[password[index], password[swapIndex]] = [password[swapIndex], password[index]]
+  }
+  return password.join('')
 }
 
 async function sendApprovalEmail(toEmail: string, martName: string, referenceCode: string, tempPassword: string) {
@@ -209,7 +227,17 @@ Deno.serve(async (req) => {
 
     if (createUserError || !created?.user) {
       console.error('[approve-registration] failed to create auth user:', createUserError)
-      return json({ error: 'Failed to create the owner account. Please try again.' }, 500, origin)
+      const authMessage = createUserError?.message ?? ''
+      const duplicateEmail = /already|registered|exists|duplicate/i.test(authMessage)
+      return json(
+        {
+          error: duplicateEmail
+            ? 'An Authentication user already exists for this email. Restore that owner profile or delete the old test Auth user before approving this registration.'
+            : 'Failed to create the owner account. Please check the Edge Function logs and try again.',
+        },
+        duplicateEmail ? 409 : 500,
+        origin,
+      )
     }
     const newUserId = created.user.id
 

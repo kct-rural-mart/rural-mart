@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   User,
   Building2,
@@ -13,14 +13,16 @@ import {
   Clock,
   Smartphone,
   AlertCircle,
+  KeyRound,
 } from 'lucide-react';
+import { useAuth } from '../../auth/context/AuthContext';
+import { ChangePasswordPage } from '../../auth/pages/ChangePasswordPage';
+import { getOwnerRuralMart, OwnerRuralMart, updateOwnerRuralMart } from '../services/martService';
 import {
   getRuralMartById,
   getRuralMarts,
-  updateRuralMart,
   getOwnerById,
   getOwners,
-  updateOwner,
 } from '../../shared/dataServices';
 
 interface OwnerSettingsPageProps {
@@ -30,6 +32,9 @@ interface OwnerSettingsPageProps {
 
 export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
   currentMartId, theme }) => {
+  const { user } = useAuth();
+  const [liveMart, setLiveMart] = useState<OwnerRuralMart | null>(null);
+  const [profileError, setProfileError] = useState('');
   // Load canonical Rural Mart and Owner profile from shared data layer
   const initialMart = useMemo(() => {
     return getRuralMartById(currentMartId || '') || getRuralMarts()[0] || null;
@@ -48,6 +53,36 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
   const [gstNumber] = useState(initialMart?.gstNumber || '—');
   const [location] = useState(initialMart ? `${initialMart.district}, Tamil Nadu` : '—');
 
+  useEffect(() => {
+    let active = true;
+    if (!currentMartId) return;
+    setProfileError('');
+    void getOwnerRuralMart(currentMartId)
+      .then((mart) => {
+        if (!active) return;
+        setLiveMart(mart);
+        setOwnerName(mart.entrepreneur_name);
+        setCompanyName(mart.mart_name);
+        setPhone(mart.mobile_number || '—');
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setProfileError(
+          error && typeof error === 'object' && 'message' in error
+            ? String((error as { message: unknown }).message)
+            : 'Unable to load owner registration details.',
+        );
+      });
+    return () => { active = false; };
+  }, [currentMartId]);
+
+  const displayedOwnerId = liveMart?.reference_code || liveMart?.id || ownerId;
+  const displayedEmail = liveMart?.email || user?.email || registeredEmail;
+  const displayedGst = liveMart?.gst_number || gstNumber || 'Not provided';
+  const displayedLocation = liveMart
+    ? [liveMart.village, liveMart.block, liveMart.district].filter(Boolean).join(', ')
+    : location;
+
   // Security Toggles
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
 
@@ -55,6 +90,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [isContactSupportOpen, setIsContactSupportOpen] = useState(false);
   const [isFullAuditLogOpen, setIsFullAuditLogOpen] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   // Edit Profile Form State
   const [editName, setEditName] = useState(ownerName);
@@ -85,30 +121,29 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
   };
 
   // Handle Save Profile Changes
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    setOwnerName(editName);
-    setCompanyName(editCompany);
-    setPhone(editPhone);
-
-    // Sync to shared data layer
-    if (initialMart) {
-      updateRuralMart(initialMart.ruralMartId, {
-        ruralMartName: editCompany,
-        ownerName: editName,
-        ownerPhone: editPhone,
-        lastUpdated: 'Just now',
+    if (!currentMartId) return;
+    try {
+      setProfileError('');
+      const updated = await updateOwnerRuralMart(currentMartId, {
+        mart_name: editCompany.trim(),
+        entrepreneur_name: editName.trim(),
+        mobile_number: editPhone.trim(),
       });
+      setLiveMart((current) => ({ ...(current ?? updated), ...updated }));
+      setOwnerName(editName.trim());
+      setCompanyName(editCompany.trim());
+      setPhone(editPhone.trim());
+      setIsEditProfileOpen(false);
+      showToast('Owner profile details updated successfully!');
+    } catch (error) {
+      setProfileError(
+        error && typeof error === 'object' && 'message' in error
+          ? String((error as { message: unknown }).message)
+          : 'Unable to update owner profile.',
+      );
     }
-    if (initialOwner) {
-      updateOwner(initialOwner.ownerId, {
-        ownerName: editName,
-        phone: editPhone,
-      });
-    }
-
-    setIsEditProfileOpen(false);
-    showToast('Owner profile details updated successfully!');
   };
 
   // Handle Submit Support Query
@@ -153,6 +188,12 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
         </div>
       )}
 
+      {profileError && (
+        <div className="p-3.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold">
+          {profileError}
+        </div>
+      )}
+
       {/* PAGE HEADER */}
       <div className="bg-white dark:bg-[#121E19] border border-[#DDE6E0] dark:border-[#1E3129] rounded-xl p-4 sm:p-5 shadow-xs">
         <h1 className="text-xl font-bold text-[#17221D] dark:text-[#E6ECE8]">
@@ -182,11 +223,11 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
             </div>
 
             <p className="text-xs text-emerald-100/80 font-medium">
-              Rural Mart Owner • Enterprise ID: {ownerId}
+              Rural Mart Owner • Enterprise ID: {displayedOwnerId}
             </p>
 
             <p className="text-xs text-emerald-200/90 font-medium">
-              {companyName} ({location})
+              {companyName} ({displayedLocation})
             </p>
           </div>
         </div>
@@ -227,7 +268,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                 GST / TAX REGISTRATION
               </span>
               <span className="font-mono font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                {gstNumber}
+                {displayedGst}
               </span>
             </div>
 
@@ -236,7 +277,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                 REGISTERED OFFICIAL EMAIL
               </span>
               <span className="font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                {registeredEmail}
+                {displayedEmail}
               </span>
             </div>
 
@@ -266,7 +307,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                 PRIMARY HUB LOCATION
               </span>
               <span className="font-bold text-[#17221D] dark:text-[#E6ECE8]">
-                {location}
+                {displayedLocation}
               </span>
             </div>
 
@@ -326,6 +367,22 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                 />
               </button>
             </div>
+
+            {/* Trusted Sessions Row */}
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="w-full p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] flex items-center justify-between text-left hover:border-[#174F3A] transition-colors"
+            >
+              <div className="flex items-start gap-2.5">
+                <KeyRound className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5] shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-[#17221D] dark:text-[#E6ECE8] block">Change Password</span>
+                  <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">Update your Supabase login password securely</span>
+                </div>
+              </div>
+              <span className="text-[11px] font-bold text-[#174F3A] dark:text-[#A3E6C5]">Change</span>
+            </button>
 
             {/* Trusted Sessions Row */}
             <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] flex items-start gap-2.5">
@@ -442,7 +499,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                 <input
                   type="text"
                   disabled
-                  value={ownerId}
+                  value={displayedOwnerId}
                   className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-slate-100 dark:bg-slate-800/80 text-slate-500 font-mono cursor-not-allowed"
                 />
               </div>
@@ -483,7 +540,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                 <input
                   type="email"
                   disabled
-                  value={registeredEmail}
+                  value={displayedEmail}
                   className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-slate-100 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed"
                 />
               </div>
@@ -522,6 +579,19 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
             </form>
 
           </div>
+        </div>
+      )}
+
+      {isChangePasswordOpen && (
+        <div className="fixed inset-0 z-50 bg-[#17221D]/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <ChangePasswordPage
+            embedded
+            onCancel={() => setIsChangePasswordOpen(false)}
+            onComplete={() => {
+              setIsChangePasswordOpen(false);
+              showToast('Password changed successfully.');
+            }}
+          />
         </div>
       )}
 

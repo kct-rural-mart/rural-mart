@@ -1,5 +1,7 @@
+
+import { supabase } from '../../lib/supabaseClient';
 import React, { useState } from 'react';
-import { Store, Mail, Lock, Eye, EyeOff, ArrowRight, AlertCircle, Info, Beaker } from 'lucide-react';
+import { Store, Mail, Lock, Eye, EyeOff, ArrowRight, AlertCircle, Info } from 'lucide-react';
 
 export interface AuthLoginUser {
   role: 'owner' | 'admin';
@@ -26,39 +28,91 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [forgotPasswordNotice, setForgotPasswordNotice] = useState(false);
+  const [forgotPasswordNotice, setForgotPasswordNotice] = useState('');
+  const [isSendingRecovery, setIsSendingRecovery] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleForgotPassword = async () => {
     setErrorMessage('');
-    setForgotPasswordNotice(false);
-
+    setForgotPasswordNotice('');
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password;
-
-    if (!cleanEmail && !cleanPassword) {
-      setErrorMessage('Please enter email address and password.');
-      return;
-    }
-
     if (!cleanEmail) {
-      setErrorMessage('Please enter email address.');
+      setErrorMessage('Enter your registered email address first.');
       return;
     }
 
-    if (!cleanPassword) {
-      setErrorMessage('Please enter password.');
+    setIsSendingRecovery(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: window.location.origin,
+    });
+    setIsSendingRecovery(false);
+
+    if (error) {
+      setErrorMessage(error.message);
       return;
     }
-
-    setIsLoading(true);
-
-    setTimeout(() => {
-      setIsLoading(false);
-      setErrorMessage('Authentication is not connected yet. Use Development Preview Mode to inspect the interface.');
-    }, 400);
+    setForgotPasswordNotice('Password recovery email sent. Open the link in that email to set a new password.');
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setErrorMessage('');
+  setForgotPasswordNotice('');
+
+  const cleanEmail = email.trim().toLowerCase();
+
+  if (!cleanEmail || !password) {
+    setErrorMessage('Please enter your email and password.');
+    return;
+  }
+
+  setIsLoading(true);
+
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+
+    if (!data.user) {
+      setErrorMessage('Unable to retrieve the authenticated user.');
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('role, rural_mart_id, must_change_password')
+      .eq('id', data.user.id)
+      .single();
+
+    if (profileError || !profile) {
+      await supabase.auth.signOut();
+      setErrorMessage('Your user profile or role is not configured.');
+      return;
+    }
+
+    if (profile.role !== 'admin' && profile.role !== 'owner') {
+      await supabase.auth.signOut();
+      setErrorMessage('Your account does not have an authorized role.');
+      return;
+    }
+
+    onLoginSuccess({
+      role: profile.role,
+      email: data.user.email ?? cleanEmail,
+      ruralMartId: profile.rural_mart_id ?? undefined,
+      userName: data.user.user_metadata?.full_name ?? undefined,
+    });
+  } catch {
+    setErrorMessage('Unable to connect to the authentication service.');
+  } finally {
+    setIsLoading(false);
+  }
+};
   return (
     <div className="min-h-screen flex flex-col justify-center items-center px-4 py-8 bg-[#F5F8F4] dark:bg-[#0B130F] text-[#17221D] dark:text-[#E6ECE8] font-sans antialiased transition-colors">
       
@@ -95,7 +149,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         {forgotPasswordNotice && (
           <div className="p-3 rounded-xl bg-amber-50 dark:bg-[#3D2D10] border border-amber-200 dark:border-amber-900/50 text-amber-800 dark:text-amber-200 text-xs font-medium flex items-start gap-2">
             <Info className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
-            <span>To reset your password, please contact the EDF System Administrator at <span className="font-bold underline">support@ruralmart.in</span> or reach out to your district coordinator.</span>
+            <span>{forgotPasswordNotice}</span>
           </div>
         )}
 
@@ -130,10 +184,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </label>
               <button
                 type="button"
-                onClick={() => setForgotPasswordNotice(true)}
+                onClick={() => void handleForgotPassword()}
+                disabled={isSendingRecovery}
                 className="text-[11px] font-semibold text-[#174F3A] dark:text-[#8ECAAA] hover:underline cursor-pointer"
               >
-                Forgot Password?
+                {isSendingRecovery ? 'Sending...' : 'Forgot Password?'}
               </button>
             </div>
             <div className="relative">
@@ -193,44 +248,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         </div>
 
       </div>
-
-      {/* Development Only: Quick Preview Controls */}
-      {/* @ts-ignore */}
-      {import.meta.env.DEV && (
-        <div className="w-full max-w-md mt-6 p-4 border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-950/20 rounded-xl space-y-3">
-          <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 mb-2">
-            <Beaker className="w-4 h-4" />
-            <span className="text-xs font-bold uppercase tracking-wide">Development Preview Mode</span>
-          </div>
-          <p className="text-[11px] text-indigo-600 dark:text-indigo-500 leading-tight">
-            Authentication is disabled while preparing for Supabase backend. Use these buttons to preview the UI.
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => onLoginSuccess({
-                role: 'owner',
-                email: 'demo.owner@ruralmart.in',
-                ruralMart: 'Demo Rural Mart',
-                userName: 'Demo Owner',
-                ruralMartId: 'RM-001'
-              })}
-              className="flex-1 bg-white dark:bg-[#121E19] hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[11px] font-bold py-2 rounded-lg cursor-pointer transition-colors"
-            >
-              Preview Owner Portal
-            </button>
-            <button
-              onClick={() => onLoginSuccess({
-                role: 'admin',
-                email: 'admin@ruralmart.in',
-                userName: 'Super Admin'
-              })}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white text-[11px] font-bold py-2 rounded-lg cursor-pointer transition-colors border border-transparent"
-            >
-              Preview Admin Portal
-            </button>
-          </div>
-        </div>
-      )}
 
     </div>
   );

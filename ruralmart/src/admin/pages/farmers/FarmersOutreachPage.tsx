@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { Theme, FarmerOutreachMartRecord, FarmerRecord } from '../../../shared/types';
-import { getFarmers, getRuralMarts, getFarmerOutreachMarts } from '../../../shared/dataServices';
+import React, { useEffect, useState, useMemo } from 'react';
+import { Theme, FarmerOutreachMartRecord, FarmerRecord, FarmerGrowthDataPoint, OutreachPerformanceDataPoint } from '../../../shared/types';
+import { getLiveFarmersOutreach } from '../../services/farmersOutreachService';
 import { FarmersKpiCards } from './FarmersKpiCards';
 import { FarmerGrowthAndRetentionChart } from './FarmerGrowthAndRetentionChart';
 import { OutreachPerformanceBarChart } from './OutreachPerformanceBarChart';
@@ -23,42 +23,10 @@ export const FarmersOutreachPage: React.FC<FarmersOutreachPageProps> = ({
   const [selectedMartModal, setSelectedMartModal] = useState<FarmerOutreachMartRecord | null>(null);
   const [selectedFarmerModal, setSelectedFarmerModal] = useState<FarmerRecord | null>(null);
   const [selectedPurchaseHistoryFarmer, setSelectedPurchaseHistoryFarmer] = useState<FarmerRecord | null>(null);
+  const [allFarmers, setAllFarmers] = useState<FarmerRecord[]>([]); const [allOutreachMarts, setAllOutreachMarts] = useState<FarmerOutreachMartRecord[]>([]);
+  const [growth, setGrowth] = useState<FarmerGrowthDataPoint[]>([]); const [outreach, setOutreach] = useState<OutreachPerformanceDataPoint[]>([]); const [error, setError] = useState('');
 
-  // Retrieve canonical farmer records via shared data service
-  const allFarmers = useMemo(() => {
-    const canonicalFarmers = getFarmers();
-    const canonicalMarts = getRuralMarts();
-
-    return canonicalFarmers.map((cf) => {
-      const mart = canonicalMarts.find((m) => m.ruralMartId === cf.ruralMartId);
-      let martDisplayName = cf.ruralMartId || 'Rural Mart';
-      if (mart) {
-        martDisplayName = mart.ruralMartName
-          .replace(' Rural Mart', '')
-          .replace(' Agro Mart', '')
-          .replace(' Farmers Hub', '');
-      }
-      return {
-        id: cf.id,
-        name: cf.name,
-        village: cf.village,
-        district: cf.district || (mart ? mart.district : 'Erode'),
-        ruralMart: martDisplayName,
-        category: cf.category,
-        animalHeadCount: cf.animalHeadCount,
-        lastVisit: cf.lastVisit,
-        status: cf.status,
-        phone: cf.phone,
-        totalPurchasesVal: cf.totalPurchasesVal,
-        joinedDate: cf.joinedDate,
-        itemsPurchased: (cf as any).itemsPurchased || 'None',
-        purchaseDate: cf.lastVisit,
-      } as FarmerRecord;
-    });
-  }, []);
-
-  // Retrieve canonical outreach records via shared data service
-  const allOutreachMarts = useMemo(() => getFarmerOutreachMarts(), []);
+  useEffect(() => { let active = true; setError(''); void getLiveFarmersOutreach().then((data) => { if (!active) return; setAllFarmers(data.farmers); setAllOutreachMarts(data.marts); setGrowth(data.growth); setOutreach(data.outreach); }).catch((reason: unknown) => { if (active) setError(reason && typeof reason === 'object' && 'message' in reason ? String((reason as { message: unknown }).message) : 'Unable to load farmer outreach.'); }); return () => { active = false; }; }, []);
 
   // Filter outreach marts by selected top header district and rural mart
   const filteredOutreachMarts = useMemo(() => {
@@ -88,6 +56,7 @@ export const FarmersOutreachPage: React.FC<FarmersOutreachPageProps> = ({
 
   return (
     <div className="space-y-5">
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
       {/* SECTION 1 — 6 KPI Cards */}
       <section>
         <FarmersKpiCards outreachMarts={filteredOutreachMarts} />
@@ -105,10 +74,10 @@ export const FarmersOutreachPage: React.FC<FarmersOutreachPageProps> = ({
       {/* SECTION 3 — Charts (Combined Growth & Retention Trend + Outreach Performance) */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Combined Farmer Growth & Customer Retention Trend */}
-        <FarmerGrowthAndRetentionChart theme={theme} />
+        <FarmerGrowthAndRetentionChart theme={theme} data={growth} />
 
         {/* Outreach Performance (Grouped Bar) */}
-        <OutreachPerformanceBarChart theme={theme} />
+        <OutreachPerformanceBarChart theme={theme} data={outreach} />
       </section>
 
       {/* Modals */}

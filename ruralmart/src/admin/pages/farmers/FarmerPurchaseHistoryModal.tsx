@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   X,
   User,
@@ -14,7 +14,7 @@ import {
   Hash,
 } from 'lucide-react';
 import { FarmerRecord } from '../../../shared/types';
-import { getSalesByRuralMart } from '../../../shared/dataServices';
+import { getLiveFarmerSales, LiveFarmerSale } from '../../services/farmersOutreachService';
 
 interface FarmerPurchaseHistoryModalProps {
   farmer: FarmerRecord | null;
@@ -40,17 +40,8 @@ export const FarmerPurchaseHistoryModal: React.FC<FarmerPurchaseHistoryModalProp
     };
   }, [farmer]);
 
-  // Fetch farmer's actual transaction bills from sales records
-  const farmerSales = useMemo(() => {
-    if (!farmer) return [];
-    const allSales = getSalesByRuralMart(farmer.ruralMart || 'RM-001');
-    return allSales.filter(
-      (s) =>
-        s.farmerId === farmer.id ||
-        (s.customerName && s.customerName.toLowerCase() === farmer.name.toLowerCase()) ||
-        (s.farmerName && s.farmerName.toLowerCase() === farmer.name.toLowerCase())
-    );
-  }, [farmer]);
+  const [farmerSales, setFarmerSales] = useState<LiveFarmerSale[]>([]);
+  useEffect(() => { let active = true; if (!farmer) { setFarmerSales([]); return () => { active = false; }; } void getLiveFarmerSales(farmer.id).then((sales) => { if (active) setFarmerSales(sales); }).catch(() => { if (active) setFarmerSales([]); }); return () => { active = false; }; }, [farmer]);
 
   // Compute Customer Summary metrics
   const customerSummary = useMemo(() => {

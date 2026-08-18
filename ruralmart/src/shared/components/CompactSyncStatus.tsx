@@ -11,7 +11,7 @@ export const CompactSyncStatus: React.FC<CompactSyncStatusProps> = ({ onSync, la
 
   const handleRefresh = () => {
     setSyncing(true);
-    // onSync(); // Disabled until backend is connected
+    onSync();
 
     setTimeout(() => {
       setSyncing(false);
@@ -23,11 +23,11 @@ export const CompactSyncStatus: React.FC<CompactSyncStatusProps> = ({ onSync, la
       <div className="flex flex-wrap items-center justify-between gap-y-1.5 gap-x-4 text-[#66736C] dark:text-[#8E9E96]">
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 font-medium">
           {/* Status Indicator */}
-          <div className="flex items-center gap-1.5 opacity-60">
+          <div className="flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            <span className="font-bold text-[#17221D] dark:text-[#E6ECE8]">Backend not connected</span>
+            <span className="font-bold text-[#17221D] dark:text-[#E6ECE8]">Supabase connected</span>
           </div>
 
           <span className="text-[#DDE6E0] dark:text-[#1E3129] hidden sm:inline">•</span>
@@ -36,7 +36,7 @@ export const CompactSyncStatus: React.FC<CompactSyncStatusProps> = ({ onSync, la
           <div className="flex items-center gap-1 text-[#66736C] dark:text-[#8E9E96]">
             <Clock className="w-3.5 h-3.5 text-[#8A958F] dark:text-[#61736A]" />
             <span>
-              Last synced: <strong className="text-[#17221D] dark:text-[#E6ECE8]">Pending connection</strong>
+              Last synced: <strong className="text-[#17221D] dark:text-[#E6ECE8]">{lastSyncedTime}</strong>
             </span>
           </div>
         </div>

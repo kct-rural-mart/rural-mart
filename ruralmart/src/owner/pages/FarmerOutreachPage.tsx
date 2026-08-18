@@ -1,5 +1,14 @@
-import React, { useState, useMemo } from 'react';
-import { saveOutreachProgram, getOutreachByRuralMart, getFarmers, updateOutreachProgram, deleteOutreachProgram } from '../../shared/dataServices';
+import React, { useEffect, useState, useMemo } from 'react';
+import { getOutreachByRuralMart, getFarmers } from '../../shared/dataServices';
+import {
+  createOwnerOutreachProgram,
+  deleteOwnerOutreachProgram,
+  getOwnerOutreachPrograms,
+  getOutreachRegisteredFarmers,
+  getRegisteredFarmerCount,
+  OutreachRegisteredFarmer,
+  updateOwnerOutreachProgram,
+} from '../services/outreachService';
 import {
   Users,
   Plus,
@@ -25,6 +34,7 @@ interface FarmerOutreachPageProps {
   currentMartId?: string | null;
   theme: 'light' | 'dark';
   searchQuery?: string;
+  dateRange: string;
 }
 
 interface SessionLogEntry {
@@ -47,6 +57,7 @@ const INITIAL_SESSION_LOGS: SessionLogEntry[] = [];
 export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   currentMartId,
   theme,
+  dateRange,
 }) => {
   // Session Logs
   const [sessionLogs, setSessionLogs] = useState<SessionLogEntry[]>(() => {
@@ -69,7 +80,46 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
     }
     return [];
   });
+  const [saveError, setSaveError] = useState('');
+  const [registeredFarmerCount, setRegisteredFarmerCount] = useState(0);
+  const [registeredFarmers, setRegisteredFarmers] = useState<OutreachRegisteredFarmer[]>([]);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!currentMartId) return;
+    setSaveError('');
+    void Promise.all([
+      getOwnerOutreachPrograms(currentMartId),
+      getRegisteredFarmerCount(currentMartId),
+      getOutreachRegisteredFarmers(currentMartId),
+    ])
+      .then(([rows, farmerCount, farmerRows]) => {
+        if (!active) return;
+        setRegisteredFarmerCount(farmerCount);
+        setRegisteredFarmers(farmerRows);
+        setSessionLogs(rows.map((row) => ({
+          id: row.id,
+          title: `${row.activity_type} - ${row.village}`,
+          activityType: row.activity_type,
+          village: row.village,
+          date: row.program_date,
+          status: 'COMPLETED',
+          description: row.activity_brief || '—',
+          topics: row.topics_covered || [],
+          attended: row.reported_attendance_count || 0,
+          existing: Math.max(0, (row.reported_attendance_count || 0) - (row.reported_new_leads_count || 0)),
+          newLeads: row.reported_new_leads_count || 0,
+          photos: [],
+        })));
+      })
+      .catch((error: unknown) => setSaveError(
+        error && typeof error === 'object' && 'message' in error
+          ? String((error as { message: unknown }).message)
+          : 'Unable to load outreach sessions.',
+      ));
+    return () => { active = false; };
+  }, [currentMartId]);
 
   // Photo upload & View/Edit/Delete Modal states
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
@@ -121,6 +171,8 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   const [selectedVillage, setSelectedVillage] = useState(defaultVillagesList[0] || 'Athani GP');
   const [description, setDescription] = useState('');
   const [farmersAttended, setFarmersAttended] = useState('');
+  const [attendeeSearch, setAttendeeSearch] = useState('');
+  const [selectedRegisteredAttendeeIds, setSelectedRegisteredAttendeeIds] = useState<string[]>([]);
 
   // Topics Chips / Tags
   const [topics, setTopics] = useState<string[]>([]);
@@ -130,19 +182,71 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   // Toast State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Auto-calculated new potential leads
+  // Aggregate-only workflow: the owner reports total attendance and how many
+  // attendees were already registered. New leads are the exact remainder.
   const attendedNumber = parseInt(farmersAttended, 10);
   const isNumeric = !isNaN(attendedNumber);
-  // Calculation formula: if valid number, calculated leads (e.g. 35% of total or attended minus baseline)
-  // handles negative values if negative number is entered
-  const calculatedNewLeads = isNumeric
-    ? Math.round(attendedNumber * 0.35)
-    : 0;
+  const validAttendance = isNumeric ? Math.max(0, attendedNumber) : 0;
+  const calculatedExistingFarmers = selectedRegisteredAttendeeIds.length;
+  const calculatedNewLeads = Math.max(0, validAttendance - calculatedExistingFarmers);
+  const matchingRegisteredFarmers = useMemo(() => {
+    const query = attendeeSearch.trim().toLowerCase();
+    const mobileQuery = query.replace(/\D/g, '');
+    return query ? registeredFarmers.filter((farmer) =>
+      farmer.farmer_code.toLowerCase().includes(query) ||
+      farmer.name.toLowerCase().includes(query) ||
+      (mobileQuery.length > 0 && farmer.mobile.replace(/\D/g, '').includes(mobileQuery))
+    ).slice(0, 8) : [];
+  }, [attendeeSearch, registeredFarmers]);
 
-  // Total summary metrics dynamically reflecting logs
-  const totalSessions = sessionLogs.length;
-  const totalFarmersReached = sessionLogs.reduce((acc, curr) => acc + curr.attended, 0);
-  const totalNewLeads = sessionLogs.reduce((acc, curr) => acc + curr.newLeads, 0);
+  // Header-selected period drives every outreach KPI.
+  const periodSessionLogs = useMemo(() => {
+    const localIso = (date: Date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const now = new Date();
+    let start = '0001-01-01';
+    let end = '9999-12-31';
+    const today = localIso(now);
+
+    if (dateRange === 'Today') {
+      start = today;
+      end = today;
+    } else if (dateRange === 'Last 7 Days' || dateRange === 'Last 30 Days') {
+      const days = dateRange === 'Last 7 Days' ? 7 : 30;
+      start = localIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - days + 1));
+      end = today;
+    } else {
+      const monthMatch = dateRange.match(/This Month \(([A-Za-z]+) (\d{4})\)/);
+      const explicitMatch = dateRange.match(/^[A-Za-z]{3}, ([A-Za-z]{3}) (\d{1,2}), (\d{4})$/);
+      if (monthMatch) {
+        const monthIndex = new Date(`${monthMatch[1]} 1, ${monthMatch[2]}`).getMonth();
+        const year = Number(monthMatch[2]);
+        start = localIso(new Date(year, monthIndex, 1));
+        end = localIso(new Date(year, monthIndex + 1, 0));
+      } else if (explicitMatch) {
+        const selected = localIso(new Date(`${explicitMatch[1]} ${explicitMatch[2]}, ${explicitMatch[3]}`));
+        start = selected;
+        end = selected;
+      }
+    }
+
+    return sessionLogs.filter((log) => {
+      // Supabase returns YYYY-MM-DD, while older in-memory entries used a
+      // display-formatted date such as "17 Aug 2026". Normalize both before
+      // applying the header period so a newly saved row updates KPIs instantly.
+      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(log.date) ? log.date : localIso(new Date(log.date));
+      return parsed >= start && parsed <= end;
+    });
+  }, [sessionLogs, dateRange]);
+
+  // Total summary metrics dynamically reflecting Supabase rows in that period.
+  const totalSessions = periodSessionLogs.length;
+  const totalFarmersReached = periodSessionLogs.reduce((acc, curr) => acc + curr.attended, 0);
+  const totalNewLeads = periodSessionLogs.reduce((acc, curr) => acc + curr.newLeads, 0);
   const conversionRate = totalFarmersReached > 0 ? `${((totalNewLeads / totalFarmersReached) * 100).toFixed(1)}%` : '0%';
   const directSalesValue = '₹0';
 
@@ -211,6 +315,8 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
     setSelectedVillage('');
     setDescription('');
     setFarmersAttended('');
+    setAttendeeSearch('');
+    setSelectedRegisteredAttendeeIds([]);
     setTopics([]);
     setUploadedPhotos([]);
     setIsAddingActivity(false);
@@ -219,51 +325,63 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   };
 
   // Save Outreach Session
-  const handleSaveSession = (e: React.FormEvent) => {
+  const handleSaveSession = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const formattedDateStr = sessionDate ? new Date(sessionDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (!currentMartId) {
+      setSaveError('Your owner account is not linked to a Rural Mart.');
+      return;
+    }
+    if (!selectedVillage.trim()) {
+      setSaveError('Village is required.');
+      return;
+    }
+    if (selectedRegisteredAttendeeIds.length > validAttendance) {
+      setSaveError('Verified registered attendees cannot exceed total farmers attended.');
+      return;
+    }
+
+    let savedProgram;
+    try {
+      setSaveError('');
+      savedProgram = await createOwnerOutreachProgram({
+        ruralMartId: currentMartId,
+        date: sessionDate,
+        activityType: selectedActivity,
+        description,
+        village: selectedVillage,
+        topics,
+        attended: isNumeric ? attendedNumber : 0,
+        attendingFarmerCodes: selectedRegisteredAttendeeIds
+          .map((farmerId) => registeredFarmers.find((farmer) => farmer.id === farmerId)?.farmer_code)
+          .filter((code): code is string => Boolean(code)),
+      });
+    } catch (error) {
+      setSaveError(error && typeof error === 'object' && 'message' in error
+        ? String((error as { message: unknown }).message)
+        : 'Unable to save the outreach session.');
+      return;
+    }
 
     const newEntry: SessionLogEntry = {
-      id: `log-${Date.now()}`,
+      id: savedProgram.id,
       title: `${selectedActivity} - ${selectedVillage}`,
       activityType: selectedActivity,
       village: selectedVillage,
-      date: formattedDateStr,
+      date: sessionDate,
       status: 'COMPLETED',
       description: description || '—',
       topics: [...topics],
-      attended: isNumeric ? attendedNumber : 0,
-      existing: isNumeric ? Math.max(0, attendedNumber - calculatedNewLeads) : 0,
-      newLeads: calculatedNewLeads,
+      attended: savedProgram.reported_attendance_count || 0,
+      existing: Math.max(
+        0,
+        (savedProgram.reported_attendance_count || 0) - (savedProgram.reported_new_leads_count || 0)
+      ),
+      newLeads: savedProgram.reported_new_leads_count || 0,
       photos: [...uploadedPhotos],
     };
 
     setSessionLogs((prev) => [newEntry, ...prev]);
-
-    // Persist outreach program to shared storage
-    saveOutreachProgram({
-      id: newEntry.id,
-      ruralMartId: currentMartId || '',
-      programName: newEntry.title,
-      programDate: formattedDateStr,
-      farmersReached: isNumeric ? attendedNumber : 0,
-      villagesCovered: 1,
-      animalPopulationCovered: 0,
-      title: newEntry.title,
-      activityType: selectedActivity,
-      village: selectedVillage,
-      district: 'Erode',
-      date: formattedDateStr,
-      status: 'Completed',
-      description: newEntry.description,
-      farmersAttended: isNumeric ? attendedNumber : 0,
-      newLeadsCount: calculatedNewLeads,
-      existingFarmersCount: isNumeric ? Math.max(0, attendedNumber - calculatedNewLeads) : 0,
-      topicsCovered: topics.join(', '),
-      topics: [...topics],
-      photos: [...uploadedPhotos],
-    });
 
     setToastMessage(`Outreach Session for "${selectedVillage}" saved successfully!`);
     setTimeout(() => setToastMessage(null), 4000);
@@ -273,6 +391,11 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
 
   return (
     <div className="space-y-4">
+      {saveError && (
+        <div className="p-3.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold">
+          {saveError}
+        </div>
+      )}
       {/* Toast Notification */}
       {toastMessage && (
         <div className="p-3.5 rounded-xl bg-[#174F3A] text-white text-xs font-bold shadow-lg border border-emerald-500/30 flex items-center justify-between animate-fade-in transition-all">
@@ -539,8 +662,8 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
             />
           </div>
 
-          {/* Total Farmers Attended + Auto Calculated Box */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+          {/* Attendance totals + exact auto-calculated new leads */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-center">
             <div className="space-y-1">
               <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
                 Total Farmers Attended <span className="text-red-500">*</span>
@@ -548,11 +671,54 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
               <input
                 type="number"
                 required
+                min="0"
                 placeholder="e.g. 65"
                 value={farmersAttended}
                 onChange={(e) => setFarmersAttended(e.target.value)}
                 className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
               />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
+                Search Registered Attendees
+              </label>
+              <input
+                type="search"
+                placeholder="Enter Farmer ID (e.g. FMR-000001)"
+                value={attendeeSearch}
+                onChange={(e) => setAttendeeSearch(e.target.value)}
+                className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
+              />
+              <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96]">
+                {selectedRegisteredAttendeeIds.length} selected from {registeredFarmerCount} registered farmers
+              </span>
+              {attendeeSearch.trim() && (
+                <div className="max-h-40 overflow-y-auto rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-white dark:bg-[#121E19] shadow-lg">
+                  {matchingRegisteredFarmers.length > 0 ? matchingRegisteredFarmers.map((farmer) => {
+                    const selected = selectedRegisteredAttendeeIds.includes(farmer.id);
+                    return (
+                      <button
+                        key={farmer.id}
+                        type="button"
+                        disabled={selected}
+                        onClick={() => {
+                          setSelectedRegisteredAttendeeIds((current) => [...current, farmer.id]);
+                          setAttendeeSearch('');
+                        }}
+                        className="w-full px-3 py-2 text-left text-xs border-b last:border-b-0 border-[#E9EFEB] dark:border-[#1E3129] hover:bg-[#E7F2EC] dark:hover:bg-[#1B3D30] disabled:opacity-50"
+                      >
+                        <span className="font-bold block">{farmer.farmer_code} · {farmer.name}</span>
+                        <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96]">
+                          {farmer.mobile}{farmer.village ? ` · ${farmer.village}` : ''}{selected ? ' · Already selected' : ''}
+                        </span>
+                      </button>
+                    );
+                  }) : (
+                    <div className="px-3 py-2 text-xs text-[#66736C] dark:text-[#8E9E96]">No registered farmer found.</div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Live Auto Calculated Box */}
@@ -562,13 +728,34 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
                   AUTO CALCULATED NEW POTENTIAL LEADS
                 </span>
                 <span className="text-xs text-[#66736C] dark:text-[#8E9E96]">
-                  Estimated fresh lead prospects
+                  Backend: total attended minus {calculatedExistingFarmers} verified attendees
                 </span>
               </div>
               <div className="text-xl font-extrabold text-[#174F3A] dark:text-[#A3E6C5]">
                 {calculatedNewLeads > 0 ? `+${calculatedNewLeads}` : calculatedNewLeads} <span className="text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">New Farmers</span>
               </div>
             </div>
+
+            {selectedRegisteredAttendeeIds.length > 0 && (
+              <div className="lg:col-span-3 flex flex-wrap gap-2">
+                {selectedRegisteredAttendeeIds.map((farmerId) => {
+                  const farmer = registeredFarmers.find((item) => item.id === farmerId);
+                  if (!farmer) return null;
+                  return (
+                    <span key={farmerId} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#E7F2EC] dark:bg-[#1B3D30] text-xs font-semibold text-[#174F3A] dark:text-[#A3E6C5]">
+                      {farmer.farmer_code} · {farmer.name}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRegisteredAttendeeIds((current) => current.filter((id) => id !== farmerId))}
+                        aria-label={`Remove ${farmer.name}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Topics Covered in Session (Tags / Chips Input) */}
@@ -924,21 +1111,29 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
             </div>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
                 if (!editLogItem) return;
-                const updatedLogs = sessionLogs.map((l) => (l.id === editLogItem.id ? editLogItem : l));
-                setSessionLogs(updatedLogs);
-                updateOutreachProgram(editLogItem.id, {
-                  title: editLogItem.title,
-                  activityType: editLogItem.activityType,
-                  village: editLogItem.village,
-                  description: editLogItem.description,
-                  farmersAttended: editLogItem.attended,
-                  newLeadsCount: editLogItem.newLeads,
-                  topics: editLogItem.topics,
-                  photos: editLogItem.photos,
-                });
+                try {
+                  await updateOwnerOutreachProgram(editLogItem.id, {
+                    activityType: editLogItem.activityType,
+                    village: editLogItem.village,
+                    description: editLogItem.description,
+                    topics: editLogItem.topics,
+                    attended: editLogItem.attended,
+                    newLeads: Math.min(editLogItem.attended, editLogItem.newLeads),
+                  });
+                  const correctedLog = {
+                    ...editLogItem,
+                    newLeads: Math.min(editLogItem.attended, editLogItem.newLeads),
+                    existing: Math.max(0, editLogItem.attended - editLogItem.newLeads),
+                  };
+                  setSessionLogs(sessionLogs.map((l) => (l.id === editLogItem.id ? correctedLog : l)));
+                } catch (error) {
+                  setSaveError(error && typeof error === 'object' && 'message' in error
+                    ? String((error as { message: unknown }).message) : 'Unable to update outreach session.');
+                  return;
+                }
                 setEditLogItem(null);
                 setToastMessage('Outreach session record updated.');
                 setTimeout(() => setToastMessage(null), 3000);
@@ -1034,8 +1229,14 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  deleteOutreachProgram(deleteConfirmLogId);
+                onClick={async () => {
+                  try {
+                    await deleteOwnerOutreachProgram(deleteConfirmLogId);
+                  } catch (error) {
+                    setSaveError(error && typeof error === 'object' && 'message' in error
+                      ? String((error as { message: unknown }).message) : 'Unable to delete outreach session.');
+                    return;
+                  }
                   setSessionLogs((prev) => prev.filter((l) => l.id !== deleteConfirmLogId));
                   setDeleteConfirmLogId(null);
                   setToastMessage('Outreach session record deleted.');

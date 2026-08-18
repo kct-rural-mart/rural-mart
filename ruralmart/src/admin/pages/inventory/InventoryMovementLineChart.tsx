@@ -9,14 +9,14 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { INVENTORY_MOVEMENT_DATA } from '../../../mockData';
+import { InventoryMovementDataPoint, Theme } from '../../../shared/types';
 
 interface InventoryMovementLineChartProps {
   theme: Theme;
+  data: InventoryMovementDataPoint[];
 }
 
-export const InventoryMovementLineChart: React.FC<InventoryMovementLineChartProps> = ({ theme }) => {
+export const InventoryMovementLineChart: React.FC<InventoryMovementLineChartProps> = ({ theme, data }) => {
   const isDark = theme === 'dark';
   const gridColor = isDark ? '#1f3327' : '#e2e8f0';
   const textColor = isDark ? '#9ca3af' : '#64748b';
@@ -84,7 +84,7 @@ export const InventoryMovementLineChart: React.FC<InventoryMovementLineChartProp
       {/* Canvas */}
       <div className="w-full h-72 md:h-80 relative">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={INVENTORY_MOVEMENT_DATA} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+          <LineChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
             <XAxis
               dataKey="period"

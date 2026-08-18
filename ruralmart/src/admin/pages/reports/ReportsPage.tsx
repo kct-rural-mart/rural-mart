@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { GlobalFilters, Theme, RuralMartData } from '../../../shared/types';
-import { getReportsRuralMarts } from '../../../shared/dataServices';
+import { getLiveRuralMarts } from '../../services/ruralMartsService';
 import { ReportPreviewModal, ReportConfig } from './ReportPreviewModal';
 import {
   FileText,
@@ -34,8 +34,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   const [selectedDistrict, setSelectedDistrict] = useState<string>('All Districts');
   const [previewConfig, setPreviewConfig] = useState<ReportConfig | null>(null);
 
-  // Retrieve canonical shared rural marts from dataServices layer
-  const allMarts = useMemo(() => getReportsRuralMarts(), []);
+  const [allMarts, setAllMarts] = useState<RuralMartData[]>([]);
+  const [loadError, setLoadError] = useState('');
+  useEffect(() => { let active = true; setLoadError(''); void getLiveRuralMarts(filters.dateRange).then((marts) => { if (active) setAllMarts(marts); }).catch((reason: unknown) => { if (active) setLoadError(reason && typeof reason === 'object' && 'message' in reason ? String((reason as { message: unknown }).message) : 'Unable to load reports.'); }); return () => { active = false; }; }, [filters.dateRange]);
 
   // Toast state
   const [toast, setToast] = useState<{ show: boolean; message: string }>({
@@ -103,6 +104,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
 
   return (
     <div className="space-y-6 animate-fadeIn pb-8">
+      {loadError && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{loadError}</div>}
       {/* Toast Notification */}
       {toast.show && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-emerald-900 text-white shadow-2xl border border-emerald-700 animate-slideUp max-w-md">

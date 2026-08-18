@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search,
   X,
@@ -23,22 +23,20 @@ import {
 } from 'lucide-react';
 import { getOwnerFarmers } from '../../ownerMockData';
 import {
-  getFarmersByRuralMart,
   deleteFarmer,
-  getOperationalEntries,
   updateOperationalEntry,
   deleteOperationalEntry,
-  getDailyBusinessCalculatedMetrics,
-  getSalesByRuralMart,
   BillLineItem,
 } from '../../shared/dataServices';
 import { CanonicalFarmer } from '../../shared/types/storage';
 import { BillingPanel, BillingPanelHandle } from '../components/BillingPanel';
+import { getDailyBusinessLiveData } from '../services/billingService';
 
 interface DailyBusinessPageProps {
   currentMartId?: string | null;
   theme: 'light' | 'dark';
   searchQuery: string;
+  dateRange: string;
 }
 
 interface OperationalEntry {
@@ -57,12 +55,14 @@ interface OperationalEntry {
   status: 'Saved' | 'Edited';
   billNumber?: string;
   lineItems?: BillLineItem[];
+  farmerId?: string;
 }
 
 export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   currentMartId,
   theme,
   searchQuery: externalSearchQuery,
+  dateRange,
 }) => {
   const isDark = theme === 'dark';
   const RURAL_MART_ID = currentMartId || '';
@@ -71,9 +71,10 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   const [refreshKey, setRefreshKey] = useState<number>(0);
 
   // --- AUTOMATIC DERIVED METRICS FROM CANONICAL RECORDS ---
-  const metrics = useMemo(() => {
-    return getDailyBusinessCalculatedMetrics(RURAL_MART_ID);
-  }, [refreshKey]);
+  const [metrics, setMetrics] = useState({
+    procurementQty: 0, procurementValue: 0, openingStock: 0, closingStock: 0,
+    salesQty: 0, totalSales: 0, customerBills: 0, avgBillValue: 0,
+  });
 
   // --- REUSABLE BILLING PANEL: ref for external actions (Registered Customers panel) ---
   const billingPanelRef = useRef<BillingPanelHandle>(null);
@@ -83,9 +84,7 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
 
   // --- ENTRY HISTORY STATE ---
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
-  const savedEntries: OperationalEntry[] = useMemo(() => {
-    return getOperationalEntries(RURAL_MART_ID);
-  }, [refreshKey]);
+  const [savedEntries, setSavedEntries] = useState<OperationalEntry[]>([]);
 
   const [historySearch, setHistorySearch] = useState<string>('');
   const [historyDate, setHistoryDate] = useState<string>('');
@@ -101,20 +100,37 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   const [viewFarmer, setViewFarmer] = useState<CanonicalFarmer | null>(null);
 
   // All registered farmers for the Registered Customers directory panel
-  const allRegisteredFarmers = useMemo(() => {
-    return getFarmersByRuralMart(RURAL_MART_ID);
-  }, [refreshKey]);
+  const [allRegisteredFarmers, setAllRegisteredFarmers] = useState<CanonicalFarmer[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    if (!RURAL_MART_ID) return;
+    getDailyBusinessLiveData(RURAL_MART_ID, dateRange)
+      .then((result) => {
+        if (!active) return;
+        setMetrics(result.metrics);
+        setSavedEntries(result.entries);
+        setAllRegisteredFarmers(result.farmers);
+      })
+      .catch((error) => console.error('Failed to load live daily business data:', error));
+    return () => { active = false; };
+  }, [RURAL_MART_ID, dateRange, refreshKey]);
 
   // Purchase history & summary for the customer currently open in the View modal
   const viewFarmerSales = useMemo(() => {
     if (!viewFarmer) return [];
-    const allSales = getSalesByRuralMart(viewFarmer.ruralMartId || RURAL_MART_ID);
-    return allSales.filter(
-      (s) =>
-        s.farmerId === viewFarmer.id ||
-        (s.customerName && s.customerName.toLowerCase() === viewFarmer.name.toLowerCase())
-    );
-  }, [viewFarmer, refreshKey]);
+    return savedEntries
+      .filter((entry) => entry.farmerId === viewFarmer.id)
+      .map((entry) => ({
+        id: entry.id,
+        date: entry.date,
+        billNumber: entry.billNumber ?? entry.id,
+        amount: entry.salesValue,
+        lineItems: entry.lineItems,
+        productName: entry.lineItems?.[0]?.productName,
+        salesQty: entry.salesQty,
+      }));
+  }, [viewFarmer, savedEntries]);
 
   const viewCustomerSummary = useMemo(() => {
     if (!viewFarmer) {

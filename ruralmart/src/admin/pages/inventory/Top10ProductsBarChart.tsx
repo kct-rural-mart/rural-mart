@@ -9,20 +9,20 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { Theme } from '../../../shared/types';
-import { TOP_10_PRODUCTS_DATA } from '../../../mockData';
+import { Theme, TopProductDataPoint } from '../../../shared/types';
 
 interface Top10ProductsBarChartProps {
   theme: Theme;
+  products: TopProductDataPoint[];
 }
 
-export const Top10ProductsBarChart: React.FC<Top10ProductsBarChartProps> = ({ theme }) => {
+export const Top10ProductsBarChart: React.FC<Top10ProductsBarChartProps> = ({ theme, products }) => {
   const isDark = theme === 'dark';
   const gridColor = isDark ? '#1f3327' : '#e2e8f0';
   const textColor = isDark ? '#9ca3af' : '#64748b';
 
   // Sort ascending for horizontal bar stack
-  const data = [...TOP_10_PRODUCTS_DATA].reverse();
+  const data = [...products].reverse();
 
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {

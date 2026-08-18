@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AreaChart,
   Area,
@@ -15,7 +15,7 @@ import {
   TimeGrouping,
   Theme,
 } from '../../../shared/types';
-import { getNetworkTrendData } from '../../../shared/dataServices';
+import { getLiveNetworkTrend } from '../../services/ruralMartsService';
 
 interface NetworkPerformanceTrendProps {
   theme: Theme;
@@ -26,8 +26,15 @@ export const NetworkPerformanceTrend: React.FC<NetworkPerformanceTrendProps> = (
   const [timeGrouping, setTimeGrouping] = useState<TimeGrouping>('Monthly');
   const [comparePrevious, setComparePrevious] = useState<boolean>(false);
 
-  // Select dataset based on time grouping from shared data layer
-  const chartData = getNetworkTrendData(timeGrouping);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    void getLiveNetworkTrend(timeGrouping)
+      .then((rows) => { if (active) setChartData(rows); })
+      .catch(() => { if (active) setChartData([]); });
+    return () => { active = false; };
+  }, [timeGrouping]);
 
   // Color tokens
   const isDark = theme === 'dark';

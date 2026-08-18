@@ -21,8 +21,9 @@ import { SettingsPage } from '../pages/settings/SettingsPage';
 import { PendingRegistrationsPage } from '../pages/PendingRegistrationsPage';
 
 import { GlobalFilters, RuralMartData, AlertStatus, AlertItem, Theme } from '../../shared/types';
-import { getReportsRuralMarts, getAlerts, saveAlerts } from '../../shared/dataServices';
-import { getApplications } from '../../lib/storageService';
+import { getAlerts, saveAlerts } from '../../shared/dataServices';
+import { getRegistrationApplications } from '../services/registrationService';
+import { getLiveRuralMarts } from '../services/ruralMartsService';
 import { ArrowLeft, Users, Package, FileText, CheckCircle2, Store } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -36,13 +37,17 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ theme, toggleTheme, on
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [pendingAppsCount, setPendingAppsCount] = useState(0);
 
-  const refreshPendingAppsCount = () => {
-    const apps = getApplications();
-    setPendingAppsCount(apps.filter((a) => a.status === 'pending').length);
+  const refreshPendingAppsCount = async () => {
+    try {
+      const apps = await getRegistrationApplications();
+      setPendingAppsCount(apps.filter((a) => a.status === 'pending').length);
+    } catch {
+      setPendingAppsCount(0);
+    }
   };
 
   useEffect(() => {
-    refreshPendingAppsCount();
+    void refreshPendingAppsCount();
   }, [activeTab]);
 
   const [filters, setFilters] = useState<GlobalFilters>({
@@ -53,14 +58,27 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ theme, toggleTheme, on
     comparisonPeriod: 'Previous Period',
   });
 
-  const [marts, setMarts] = useState<RuralMartData[]>(() => getReportsRuralMarts());
+  const [marts, setMarts] = useState<RuralMartData[]>([]);
+  const [overviewError, setOverviewError] = useState('');
+  const [overviewRefreshKey, setOverviewRefreshKey] = useState(0);
   const [alerts, setAlerts] = useState<AlertItem[]>(() => getAlerts());
   const [lastSyncedTime, setLastSyncedTime] = useState<string>('07 Aug 2026, 3:45 PM');
 
   useEffect(() => {
-    setMarts(getReportsRuralMarts());
+    let active = true;
     setAlerts(getAlerts());
-  }, [activeTab]);
+    setOverviewError('');
+    void getLiveRuralMarts(filters.dateRange)
+      .then((rows) => { if (active) setMarts(rows); })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        setMarts([]);
+        setOverviewError(reason && typeof reason === 'object' && 'message' in reason
+          ? String((reason as { message: unknown }).message)
+          : 'Unable to load the Executive Overview.');
+      });
+    return () => { active = false; };
+  }, [activeTab, filters.dateRange, overviewRefreshKey]);
 
   const [selectedMart, setSelectedMart] = useState<RuralMartData | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -73,6 +91,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ theme, toggleTheme, on
       day: '2-digit', month: 'short', year: 'numeric',
       hour: 'numeric', minute: '2-digit', hour12: true
     }));
+    setOverviewRefreshKey((value) => value + 1);
   };
 
   const handleReviewAlert = (alertId: string, newStatus: AlertStatus) => {
@@ -147,9 +166,6 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ theme, toggleTheme, on
         />
 
         <main className="flex-1 p-3 md:p-5 space-y-4 max-w-[1600px] w-full mx-auto">
-          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3 text-center shadow-sm mb-4">
-            <p className="text-amber-800 dark:text-amber-200 text-sm font-medium">Backend not connected — displaying dashboard structure only.</p>
-          </div>
           {activeTab === 'Rural Marts' ? (
             <RuralMartsPage theme={theme} filters={filters} />
           ) : activeTab === 'Business & Finance' ? (
@@ -220,6 +236,11 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ theme, toggleTheme, on
             </div>
           ) : (
             <>
+              {overviewError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                  {overviewError}
+                </div>
+              )}
               <section aria-label="Key Performance Indicators">
                 <KpiCards marts={filteredMarts} />
               </section>

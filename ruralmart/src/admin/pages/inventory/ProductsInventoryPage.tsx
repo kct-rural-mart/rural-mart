@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { Theme, ProductInventoryRecord } from '../../../shared/types';
-import { getProducts, getRuralMarts } from '../../../shared/dataServices';
+import React, { useEffect, useState, useMemo } from 'react';
+import { Theme, ProductInventoryRecord, InventoryMovementDataPoint, TopProductDataPoint } from '../../../shared/types';
+import { getAdminInventory } from '../../services/inventoryService';
 import { ProductsKpiCards } from './ProductsKpiCards';
 import { InventoryMovementLineChart } from './InventoryMovementLineChart';
 import { Top10ProductsBarChart } from './Top10ProductsBarChart';
@@ -26,39 +26,24 @@ export const ProductsInventoryPage: React.FC<ProductsInventoryPageProps> = ({
   setSearchQuery,
 }) => {
   const [selectedProduct, setSelectedProduct] = useState<ProductInventoryRecord | null>(null);
+  const [allProducts, setAllProducts] = useState<ProductInventoryRecord[]>([]);
+  const [movement, setMovement] = useState<InventoryMovementDataPoint[]>([]);
+  const [topProducts, setTopProducts] = useState<TopProductDataPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // Derive products from shared data layer
-  const allProducts = useMemo(() => {
-    const canonicalProducts = getProducts();
-    const canonicalMarts = getRuralMarts();
-
-    return canonicalProducts.map((p) => {
-      const mart = canonicalMarts.find((m) => m.ruralMartId === p.ruralMartId);
-      let martDisplayName = p.ruralMartId || 'Rural Mart';
-      if (mart) {
-        martDisplayName = mart.ruralMartName
-          .replace(' Rural Mart', '')
-          .replace(' Agro Mart', '')
-          .replace(' Farmers Hub', '');
-      }
-      return {
-        id: p.id,
-        code: p.code,
-        name: p.name,
-        category: p.category,
-        ruralMart: martDisplayName,
-        district: p.district || (mart ? mart.district : 'Erode'),
-        stockQty: p.stockQty,
-        reorderLevel: p.reorderLevel,
-        unitPrice: p.sellingPrice,
-        salesQty: (p as any).salesQty ?? 0,
-        procurementQty: (p as any).procurementQty ?? 0,
-        inventoryValue: (p as any).inventoryValue ?? (p.stockQty * p.sellingPrice),
-        status: p.status,
-        lastRestocked: p.lastRestocked,
-      } as ProductInventoryRecord;
-    });
-  }, []);
+  useEffect(() => {
+    let active = true; setLoading(true); setError('');
+    void getAdminInventory(filters.dateRange).then((data) => {
+      if (!active) return; setAllProducts(data.products); setMovement(data.movement); setTopProducts(data.topProducts);
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      const message = reason && typeof reason === 'object' && 'message' in reason ? String((reason as { message: unknown }).message) : 'Unable to load inventory.';
+      const code = reason && typeof reason === 'object' && 'code' in reason ? ` (Code: ${String((reason as { code: unknown }).code)})` : '';
+      setError(`${message}${code}`);
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [filters.dateRange]);
 
   // Filter products based on selected district / rural mart
   const filteredProducts = useMemo(() => {
@@ -75,6 +60,8 @@ export const ProductsInventoryPage: React.FC<ProductsInventoryPageProps> = ({
 
   return (
     <div className="space-y-6">
+      {loading && <div className="rounded-xl border border-[#DDE6E0] bg-white p-4 text-sm font-semibold text-[#174F3A]">Loading live inventory...</div>}
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
       {/* SECTION 1 — 6 KPI Cards */}
       <section>
         <ProductsKpiCards products={filteredProducts} />
@@ -92,8 +79,8 @@ export const ProductsInventoryPage: React.FC<ProductsInventoryPageProps> = ({
 
       {/* SECTION 3 — Charts Grid */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <InventoryMovementLineChart theme={theme} />
-        <Top10ProductsBarChart theme={theme} />
+        <InventoryMovementLineChart theme={theme} data={movement} />
+        <Top10ProductsBarChart theme={theme} products={topProducts} />
       </section>
 
       {/* Detail Modal */}

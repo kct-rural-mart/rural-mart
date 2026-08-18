@@ -10,6 +10,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { MartRegistrationFormData } from '../../shared/types';
+import { supabase } from '../../lib/supabaseClient';
 
 interface RegisterMartPageProps {
   onRegisterSuccess: (formData: MartRegistrationFormData) => void;
@@ -41,6 +42,8 @@ export const RegisterMartPage: React.FC<RegisterMartPageProps> = ({
   const [mobileError, setMobileError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [formError, setFormError] = useState('');
 
   const districts = ['Erode', 'Coimbatore', 'Tiruppur', 'Salem', 'Madurai'];
 
@@ -59,25 +62,86 @@ export const RegisterMartPage: React.FC<RegisterMartPageProps> = ({
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      if (!file.type.startsWith('image/')) {
+        setFormError('Please select an image file.');
+        e.target.value = '';
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setFormError('The image must be 5 MB or smaller.');
+        e.target.value = '';
+        return;
+      }
+      setFormError('');
+      setSelectedFile(file);
       setSelectedFileName(file.name);
       setFormData((prev) => ({ ...prev, photoFileName: file.name }));
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
 
     if (formData.mobileNumber.length !== 10) {
       setMobileError('Mobile number must be exactly 10 digits');
       return;
     }
 
-    setIsLoading(true);
+    if (formData.aadhaarNumber && !/^\d{12}$/.test(formData.aadhaarNumber)) {
+      setFormError('Aadhaar number must contain exactly 12 digits.');
+      return;
+    }
+    if (formData.gstNumber && formData.gstNumber.length !== 15) {
+      setFormError('GST number must contain exactly 15 characters.');
+      return;
+    }
 
-    setTimeout(() => {
+    setIsLoading(true);
+    let uploadedPath: string | null = null;
+
+    try {
+      let photoUrl: string | null = null;
+      if (selectedFile) {
+        const extension = selectedFile.name.split('.').pop()?.toLowerCase() || 'jpg';
+        uploadedPath = `pending/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from('registration-photos')
+          .upload(uploadedPath, selectedFile, { cacheControl: '3600', upsert: false });
+        if (uploadError) throw uploadError;
+
+        // The bucket is private. Persist the object path; authorized admin views
+        // can request a short-lived signed URL when they need to display it.
+        photoUrl = uploadedPath;
+      }
+
+      const { error } = await supabase.from('pending_registrations').insert({
+        mart_name: formData.martName.trim(),
+        entrepreneur_name: formData.entrepreneurName.trim(),
+        mobile_number: formData.mobileNumber,
+        email: formData.email.trim().toLowerCase(),
+        district: formData.district,
+        block: formData.block.trim(),
+        village: formData.village.trim(),
+        gps_lat: formData.latitude.trim(),
+        gps_lng: formData.longitude.trim(),
+        opening_date: formData.openingDate,
+        aadhaar_number: formData.aadhaarNumber?.trim() || null,
+        gst_number: formData.gstNumber?.trim().toUpperCase() || null,
+        photo_url: photoUrl,
+        status: 'pending',
+      });
+      if (error) throw error;
+
+      onRegisterSuccess(formData);
+    } catch (error) {
+      if (uploadedPath) {
+        await supabase.storage.from('registration-photos').remove([uploadedPath]);
+      }
+      setFormError(error instanceof Error ? error.message : 'Unable to submit the application.');
+    } finally {
       setIsLoading(false);
-      setMobileError('Registration backend is not connected yet. Your application has not been submitted.');
-    }, 600);
+    }
   };
 
   return (
@@ -116,6 +180,13 @@ export const RegisterMartPage: React.FC<RegisterMartPageProps> = ({
             </div>
           </div>
         </div>
+
+        {formError && (
+          <div className="p-3 rounded-xl bg-red-50 dark:bg-[#3D1717] border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-xs font-medium flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{formError}</span>
+          </div>
+        )}
 
         {/* Registration Form */}
         <form onSubmit={handleSubmit} className="space-y-6">

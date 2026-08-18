@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { OwnerSidebar } from '../navigation/OwnerSidebar';
 import { OwnerHeader } from '../navigation/OwnerHeader';
 import { OwnerDashboardPage } from '../pages/OwnerDashboardPage';
@@ -9,8 +9,20 @@ import { FinancialDashboardPage } from '../pages/FinancialDashboardPage';
 import { OwnerSettingsPage } from '../pages/OwnerSettingsPage';
 import { CompactSyncStatus } from '../../shared/components/CompactSyncStatus';
 import { NotificationsPopover } from '../../shared/components/NotificationsPopover';
-// import { INITIAL_ALERTS } from '../../mockData'; // Removed mock data
-// import { getRuralMartById, getRuralMarts, getOwnerById, getOwners } from '../../shared/dataServices';
+import { useAuth } from '../../auth/context/AuthContext';
+import { getOwnerRuralMart, OwnerRuralMart } from '../services/martService';
+
+function readableMartError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const value = error as { message?: string; details?: string; hint?: string; code?: string };
+    const detail = [value.message, value.details, value.hint, value.code ? `Code: ${value.code}` : '']
+      .filter(Boolean)
+      .join(' — ');
+    if (detail) return detail;
+  }
+  return 'Unable to load the Rural Mart.';
+}
 
 interface OwnerLayoutProps {
   theme: 'light' | 'dark';
@@ -27,24 +39,34 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
   onLogout,
   ownerEmail,
 }) => {
+  const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('Overall Dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateRange, setDateRange] = useState('Last 30 Days');
   const [lastSyncedTime, setLastSyncedTime] = useState('Today, 03:45 PM');
 
-  // Load canonical Rural Mart and Owner from shared data layer
-  const currentMart: any = useMemo(() => {
-    // TODO: Connect to backend. For now, return null to show empty state.
-    return null;
-  }, [ownerEmail]);
+  const [currentMart, setCurrentMart] = useState<OwnerRuralMart | null>(null);
+  const [martError, setMartError] = useState('');
 
-  const currentOwner: any = useMemo(() => {
-    return null;
-  }, [currentMart]);
+  useEffect(() => {
+    let active = true;
+    if (!profile?.rural_mart_id) return;
+    setMartError('');
+    void getOwnerRuralMart(profile.rural_mart_id)
+      .then((mart) => {
+        if (active) setCurrentMart(mart);
+      })
+      .catch((error: unknown) => {
+        if (active) setMartError(readableMartError(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [profile?.rural_mart_id]);
 
-  const displayMartName = currentMart?.ruralMartName || '—';
-  const displayOwnerName = currentOwner?.ownerName || '—';
+  const displayMartName = currentMart?.mart_name || 'Your Rural Mart';
+  const displayOwnerName = currentMart?.entrepreneur_name || ownerEmail || 'Mart Owner';
 
   // Modals & Popovers
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -112,14 +134,15 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
 
         {/* Main Workspace Render */}
         <main className="flex-1 p-3 md:p-5 space-y-4 max-w-[1600px] w-full mx-auto">
-          {(!currentMart) && (
+          {martError && (
             <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl p-3 text-center shadow-sm mb-4">
-              <p className="text-amber-800 dark:text-amber-200 text-sm font-medium">Backend not connected — displaying dashboard structure only.</p>
+              <p className="text-amber-800 dark:text-amber-200 text-sm font-medium">{martError}</p>
             </div>
           )}
 
           {(activeTab === 'Overall Dashboard') && (
             <OwnerDashboardPage
+              currentMartId={profile?.rural_mart_id}
               theme={theme}
               onNavigateTab={(tab) => setActiveTab(tab)}
               onOpenRecordSaleModal={() => setActiveTab('Daily Business')}
@@ -129,13 +152,16 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
 
           {(activeTab === 'Daily Business') && (
             <DailyBusinessPage
+              currentMartId={profile?.rural_mart_id}
               theme={theme}
               searchQuery={searchQuery}
+              dateRange={dateRange}
             />
           )}
 
           {(activeTab === 'Product & Inventory') && (
             <ProductInventoryPage
+              currentMartId={profile?.rural_mart_id}
               theme={theme}
               searchQuery={searchQuery}
             />
@@ -143,19 +169,23 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
 
           {(activeTab === 'Farmer Outreach') && (
             <FarmerOutreachPage
+              currentMartId={profile?.rural_mart_id}
               theme={theme}
               searchQuery={searchQuery}
+              dateRange={dateRange}
             />
           )}
 
           {(activeTab === 'Financial Dashboard') && (
             <FinancialDashboardPage
+              currentMartId={profile?.rural_mart_id}
               theme={theme}
             />
           )}
 
           {(activeTab === 'Settings') && (
             <OwnerSettingsPage
+              currentMartId={profile?.rural_mart_id}
               theme={theme}
             />
           )}

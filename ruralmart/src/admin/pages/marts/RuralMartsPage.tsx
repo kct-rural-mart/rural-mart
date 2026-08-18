@@ -1,12 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { GlobalFilters, Theme, RuralMartData } from '../../../shared/types';
-import { INITIAL_RURAL_MARTS } from '../../../mockData';
 import { RuralMartsKpiCards } from './RuralMartsKpiCards';
 import { RuralMartPerformanceChart } from './RuralMartPerformanceChart';
 import { DistrictWisePerformanceChart } from './DistrictWisePerformanceChart';
 import { RuralMartDirectoryTable } from './RuralMartDirectoryTable';
 import { RuralMartDetailModal } from './RuralMartDetailModal';
-import { getRuralMarts } from '../../../shared/dataServices';
+import { getLiveRuralMarts } from '../../services/ruralMartsService';
 
 interface RuralMartsPageProps {
   filters: GlobalFilters;
@@ -18,58 +17,28 @@ export const RuralMartsPage: React.FC<RuralMartsPageProps> = ({
   theme,
 }) => {
   const [selectedMart, setSelectedMart] = useState<RuralMartData | null>(null);
+  const [allMarts, setAllMarts] = useState<RuralMartData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // Combine canonical marts from shared service layer
-  const allMarts = useMemo(() => {
-    const canonicalMarts = getRuralMarts();
-
-    return canonicalMarts.map((cm) => {
-      // Match against static mock data to retain performance analytics metrics
-      const existingMock = INITIAL_RURAL_MARTS.find(
-        (m) =>
-          m.id.toLowerCase() === cm.ruralMartId.toLowerCase() ||
-          m.name.toLowerCase() === cm.ruralMartName.toLowerCase() ||
-          cm.ruralMartName.toLowerCase().includes(m.name.toLowerCase()) ||
-          m.id.replace('rm-', 'RM-00') === cm.ruralMartId
-      );
-
-      const formattedStatus = (
-        cm.status
-          ? cm.status.charAt(0).toUpperCase() + cm.status.slice(1).toLowerCase()
-          : 'Active'
-      ) as 'Active' | 'Delayed' | 'Inactive';
-
-      return {
-        id: cm.ruralMartId, // Canonical ID e.g., RM-001
-        name: cm.ruralMartName,
-        district: cm.district,
-        status: formattedStatus,
-        salesCr: existingMock ? existingMock.salesCr : 0.18,
-        salesRaw: existingMock ? existingMock.salesRaw : 1800000,
-        grossProfitLakhs: existingMock ? existingMock.grossProfitLakhs : 3.8,
-        grossProfitRaw: existingMock ? existingMock.grossProfitRaw : 380000,
-        registeredFarmers: existingMock ? existingMock.registeredFarmers : 500,
-        farmersReached: existingMock ? existingMock.farmersReached : 210,
-        farmerFootfall: existingMock ? existingMock.farmerFootfall : 350,
-        score: existingMock ? existingMock.score : 88,
-        targetScore: existingMock ? existingMock.targetScore : 90,
-        dataCompleteness: existingMock ? existingMock.dataCompleteness : 100,
-        lastUpdated: cm.lastUpdated || 'Just now',
-        manager: cm.ownerName || (existingMock ? existingMock.manager : 'Mart Owner'),
-        contact: cm.ownerPhone || cm.ownerEmail || (existingMock ? existingMock.contact : 'N/A'),
-        scoreBreakdown: existingMock
-          ? existingMock.scoreBreakdown
-          : {
-              salesGrowth: 18.0,
-              profitability: 17.5,
-              farmerEngagement: 18.0,
-              outreachImpact: 14.5,
-              inventoryHealth: 13.0,
-              compliance: 9.5,
-            },
-      };
-    });
-  }, []);
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setError('');
+    void getLiveRuralMarts(filters.dateRange)
+      .then((marts) => { if (active) setAllMarts(marts); })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        const details = reason && typeof reason === 'object' && 'message' in reason
+          ? String((reason as { message: unknown }).message)
+          : 'Unable to load Rural Marts.';
+        const code = reason && typeof reason === 'object' && 'code' in reason
+          ? ` (Code: ${String((reason as { code: unknown }).code)})`
+          : '';
+        setError(`${details}${code}`);
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [filters.dateRange]);
 
   // Filter Rural Marts dataset according to global header filters if applicable
   const filteredMarts = useMemo(() => {
@@ -90,6 +59,8 @@ export const RuralMartsPage: React.FC<RuralMartsPageProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
+      {loading && <div className="rounded-xl border border-[#DDE6E0] bg-white p-4 text-sm font-semibold text-[#174F3A]">Loading live Rural Mart data...</div>}
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
       {/* SECTION 1 — KPI Cards (6) */}
       <section>
         <RuralMartsKpiCards marts={filteredMarts} />
@@ -109,7 +80,7 @@ export const RuralMartsPage: React.FC<RuralMartsPageProps> = ({
         <RuralMartPerformanceChart theme={theme} marts={filteredMarts} />
 
         {/* Chart 2: District-wise Performance (Column chart) */}
-        <DistrictWisePerformanceChart theme={theme} />
+        <DistrictWisePerformanceChart theme={theme} marts={filteredMarts} />
       </section>
 
       {/* Detail Inspection Modal */}
