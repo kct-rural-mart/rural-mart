@@ -98,3 +98,6 @@ $$;
 grant execute on function public.record_outreach_aggregate(
   uuid, date, text, text, text, text[], integer, text[]
 ) to authenticated;
+
+-- Make the new RPC signature immediately visible to the Supabase Data API.
+notify pgrst, 'reload schema';
