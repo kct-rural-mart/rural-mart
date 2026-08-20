@@ -388,19 +388,34 @@ export interface ReportUsageCategoryPoint {
 
 // Owner Portal Types
 export interface MartRegistrationFormData {
+  // Section 1 — Rural Mart Details
   martName: string;
-  entrepreneurName: string;
   mobileNumber: string;
-  email: string;
   district: string;
   block: string;
   village: string;
-  latitude: string;
-  longitude: string;
+  physicalAddress: string;
   openingDate: string;
-  aadhaarNumber?: string;
   gstNumber?: string;
-  photoFileName?: string;
+  martPhotoFileName?: string;
+
+  // Section 2 — Entrepreneur Details (KYC)
+  entrepreneurName: string;
+  entrepreneurPrimaryMobile: string;
+  entrepreneurSecondaryMobile?: string;
+  entrepreneurEmail: string;
+  entrepreneurDob: string;
+  entrepreneurGender: string;
+  entrepreneurAddressPermanent: string;
+  entrepreneurAddressTemporary?: string;
+  entrepreneurQualification: string;
+  entrepreneurAadhaarNumber: string;
+  entrepreneurPanNumber: string;
+  bankAccountNumber: string;
+  ifscCode: string;
+  bankName: string;
+  bankBranch: string;
+  entrepreneurPhotoFileName?: string;
 }
 
 export interface OwnerDailyTransaction {

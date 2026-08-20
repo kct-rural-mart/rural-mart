@@ -255,12 +255,18 @@ Deno.serve(async (req) => {
         district: registration.district,
         block: registration.block,
         village: registration.village,
-        gps_lat: registration.gps_lat,
-        gps_lng: registration.gps_lng,
         opening_date: registration.opening_date,
         aadhaar_number: registration.aadhaar_number,
         gst_number: registration.gst_number,
-        photo_url: registration.photo_url,
+        // The old single-photo form wrote to `photo_url`; the redesigned form
+        // writes to `mart_photo_url` instead. Falling back to `photo_url` keeps
+        // registrations submitted before this change (which only ever populated
+        // that column) working the same as they always did.
+        photo_url: registration.mart_photo_url ?? registration.photo_url,
+        // Entrepreneur KYC + bank fields captured at registration (physical_address,
+        // entrepreneur_*, bank_*, ifsc_code, entrepreneur_photo_url) are intentionally
+        // not copied onto rural_marts yet — it has no matching columns for them. They
+        // remain readable from pending_registrations via rural_marts.registration_id.
       })
       .select()
       .single()
