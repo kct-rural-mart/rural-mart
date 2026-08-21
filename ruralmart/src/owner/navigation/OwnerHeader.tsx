@@ -67,18 +67,6 @@ export const OwnerHeader: React.FC<OwnerHeaderProps> = ({
         {/* Right Controls Bar */}
         <div className="flex flex-wrap items-center gap-2 md:gap-2.5">
           
-          {/* Search Bar */}
-          <div className="relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products, records, farmers..."
-              className="h-8 w-48 sm:w-64 pl-8 pr-3 text-xs font-medium rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8] focus:outline-none focus:ring-1 focus:ring-[#174F3A] placeholder-[#8A958F]"
-            />
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#8A958F] dark:text-[#61736A] pointer-events-none" />
-          </div>
-
           {/* Date Selector */}
           <div className="relative">
             <div className="flex items-center">

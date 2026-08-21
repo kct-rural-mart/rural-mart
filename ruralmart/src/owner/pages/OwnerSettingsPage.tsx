@@ -3,17 +3,17 @@ import {
   User,
   Building2,
   FileCheck,
-  ShieldCheck,
-  Lock,
   Headphones,
   CheckCircle2,
   X,
   ExternalLink,
   Edit2,
   Clock,
-  Smartphone,
   AlertCircle,
   KeyRound,
+  Store,
+  UserCircle2,
+  Landmark,
 } from 'lucide-react';
 import { useAuth } from '../../auth/context/AuthContext';
 import { ChangePasswordPage } from '../../auth/pages/ChangePasswordPage';
@@ -29,6 +29,27 @@ interface OwnerSettingsPageProps {
   currentMartId?: string | null;
   theme: 'light' | 'dark';
 }
+
+const TAMIL_NADU_DISTRICTS = [
+  'Ariyalur', 'Chengalpattu', 'Chennai', 'Coimbatore', 'Cuddalore', 'Dharmapuri',
+  'Dindigul', 'Erode', 'Kallakurichi', 'Kanchipuram', 'Kanyakumari', 'Karur',
+  'Krishnagiri', 'Madurai', 'Mayiladuthurai', 'Nagapattinam', 'Namakkal',
+  'Nilgiris', 'Perambalur', 'Pudukkottai', 'Ramanathapuram', 'Ranipet',
+  'Salem', 'Sivaganga', 'Tenkasi', 'Thanjavur', 'Theni', 'Thoothukudi',
+  'Tiruchirappalli', 'Tirunelveli', 'Tirupathur', 'Tiruppur', 'Tiruvallur',
+  'Tiruvannamalai', 'Tiruvarur', 'Vellore', 'Viluppuram', 'Virudhunagar',
+];
+
+// Shared input classes so the Edit Profile form visually matches registration
+const fieldInputClass =
+  'w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]';
+const fieldInputDisabledClass =
+  'w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-slate-100 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed';
+const fieldTextareaClass =
+  'w-full p-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8] resize-none';
+const fieldLabelClass = 'block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]';
+const fieldFileWrapClass =
+  'inline-flex items-center gap-2 h-9 px-3 text-xs font-semibold rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#174F3A] dark:text-[#A3E6C5] cursor-pointer';
 
 export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
   currentMartId, theme }) => {
@@ -83,19 +104,50 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
     ? [liveMart.village, liveMart.block, liveMart.district].filter(Boolean).join(', ')
     : location;
 
-  // Security Toggles
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
-
   // Modals state
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [isContactSupportOpen, setIsContactSupportOpen] = useState(false);
   const [isFullAuditLogOpen, setIsFullAuditLogOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
-  // Edit Profile Form State
-  const [editName, setEditName] = useState(ownerName);
-  const [editCompany, setEditCompany] = useState(companyName);
-  const [editPhone, setEditPhone] = useState(phone);
+  // ---------------------------------------------------------------------
+  // EDIT PROFILE FORM STATE
+  // Mirrors the two registration sections: Rural Mart Details + Entrepreneur Details
+  // ---------------------------------------------------------------------
+
+  // Section 1: Rural Mart / Shop Details
+  const [editMartName, setEditMartName] = useState('');
+  const [editMartMobile, setEditMartMobile] = useState('');
+  const [editDistrict, setEditDistrict] = useState('');
+  const [editBlock, setEditBlock] = useState('');
+  const [editVillage, setEditVillage] = useState('');
+  const [editOpeningDate, setEditOpeningDate] = useState(''); // TODO: map to mart.opening_date
+  const [editPhysicalAddress, setEditPhysicalAddress] = useState(''); // TODO: map to mart.physical_address
+  const [editGstNumber, setEditGstNumber] = useState('');
+  const [editMartPhoto, setEditMartPhoto] = useState<File | null>(null); // TODO: wire to storage upload
+
+  // Section 2: Entrepreneur / Farmer Personal Details
+  const [editAadhaarName, setEditAadhaarName] = useState(''); // TODO: map to mart.entrepreneur_name (name as per Aadhaar)
+  const [editPrimaryMobile, setEditPrimaryMobile] = useState('');
+  const [editSecondaryMobile, setEditSecondaryMobile] = useState(''); // TODO: map to mart.secondary_mobile
+  const [editEmail, setEditEmail] = useState(''); // read-only — Registered Email ID
+  const [editDob, setEditDob] = useState(''); // TODO: map to mart.date_of_birth
+  const [editAge, setEditAge] = useState(''); // derived from DOB, read-only
+  const [editGender, setEditGender] = useState(''); // TODO: map to mart.gender
+  const [editQualification, setEditQualification] = useState(''); // TODO: map to mart.qualification
+  const [editAddressPermanent, setEditAddressPermanent] = useState(''); // TODO: map to mart.address_permanent
+  const [editAddressTemporary, setEditAddressTemporary] = useState(''); // TODO: map to mart.address_temporary
+  const [editAadhaarNumber, setEditAadhaarNumber] = useState(''); // TODO: map to mart.aadhaar_number
+  const [editPanNumber, setEditPanNumber] = useState(''); // TODO: map to mart.pan_number
+  const [editSelfie, setEditSelfie] = useState<File | null>(null); // TODO: wire to storage upload
+
+  // Bank Details (part of Entrepreneur Details section in registration)
+  const [editBankAccountNumber, setEditBankAccountNumber] = useState(''); // TODO: map to mart.bank_account_number
+  const [editIfscCode, setEditIfscCode] = useState(''); // TODO: map to mart.ifsc_code
+  const [editBankName, setEditBankName] = useState(''); // TODO: map to mart.bank_name
+  const [editBranch, setEditBranch] = useState(''); // TODO: map to mart.branch
+
+  const [editFormError, setEditFormError] = useState('');
 
   // Contact Support Form State
   const [supportSubject, setSupportSubject] = useState('');
@@ -112,11 +164,61 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
     }, 4000);
   };
 
-  // Handle Edit Profile Open
+  // Auto-calc age from DOB, same convenience as the registration form
+  useEffect(() => {
+    if (!editDob) {
+      setEditAge('');
+      return;
+    }
+    const dob = new Date(editDob);
+    if (Number.isNaN(dob.getTime())) {
+      setEditAge('');
+      return;
+    }
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+    const m = today.getMonth() - dob.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
+      age -= 1;
+    }
+    setEditAge(String(age));
+  }, [editDob]);
+
+  // Handle Edit Profile Open — populate every field from the current mart/owner record
   const handleOpenEditProfile = () => {
-    setEditName(ownerName);
-    setEditCompany(companyName);
-    setEditPhone(phone);
+    setEditFormError('');
+
+    // Section 1
+    setEditMartName(companyName || '');
+    setEditMartMobile(liveMart?.mobile_number || '');
+    setEditDistrict(liveMart?.district || initialMart?.district || '');
+    setEditBlock(liveMart?.block || '');
+    setEditVillage(liveMart?.village || '');
+    setEditOpeningDate((liveMart as any)?.opening_date || '');
+    setEditPhysicalAddress((liveMart as any)?.physical_address || '');
+    setEditGstNumber(displayedGst === 'Not provided' ? '' : displayedGst);
+    setEditMartPhoto(null);
+
+    // Section 2
+    setEditAadhaarName(ownerName || '');
+    setEditPrimaryMobile(phone || '');
+    setEditSecondaryMobile((liveMart as any)?.secondary_mobile || '');
+    setEditEmail(String(displayedEmail || ''));
+    setEditDob((liveMart as any)?.date_of_birth || '');
+    setEditGender((liveMart as any)?.gender || '');
+    setEditQualification((liveMart as any)?.qualification || '');
+    setEditAddressPermanent((liveMart as any)?.address_permanent || '');
+    setEditAddressTemporary((liveMart as any)?.address_temporary || '');
+    setEditAadhaarNumber((liveMart as any)?.aadhaar_number || '');
+    setEditPanNumber((liveMart as any)?.pan_number || '');
+    setEditSelfie(null);
+
+    // Bank details
+    setEditBankAccountNumber((liveMart as any)?.bank_account_number || '');
+    setEditIfscCode((liveMart as any)?.ifsc_code || '');
+    setEditBankName((liveMart as any)?.bank_name || '');
+    setEditBranch((liveMart as any)?.branch || '');
+
     setIsEditProfileOpen(true);
   };
 
@@ -124,19 +226,40 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentMartId) return;
+
+    // Basic required-field guard, mirrors the * fields on the registration form
+    if (
+      !editMartName.trim() || !editMartMobile.trim() || !editDistrict.trim() ||
+      !editBlock.trim() || !editVillage.trim() || !editOpeningDate.trim() ||
+      !editPhysicalAddress.trim() || !editAadhaarName.trim() || !editPrimaryMobile.trim() ||
+      !editDob.trim() || !editGender.trim() || !editQualification.trim() ||
+      !editAddressPermanent.trim() || !editAadhaarNumber.trim() || !editPanNumber.trim() ||
+      !editBankAccountNumber.trim() || !editIfscCode.trim() || !editBankName.trim() || !editBranch.trim()
+    ) {
+      setEditFormError('Please fill in all required fields marked with *.');
+      return;
+    }
+
     try {
+      setEditFormError('');
       setProfileError('');
+
       const updated = await updateOwnerRuralMart(currentMartId, {
-        mart_name: editCompany.trim(),
-        entrepreneur_name: editName.trim(),
-        mobile_number: editPhone.trim(),
-      });
+        mart_name: editMartName.trim(),
+        entrepreneur_name: editAadhaarName.trim(),
+        mobile_number: editMartMobile.trim(),
+        district: editDistrict.trim(),
+        block: editBlock.trim(),
+        village: editVillage.trim(),
+        gst_number: editGstNumber.trim(),
+      } as any);
+
       setLiveMart((current) => ({ ...(current ?? updated), ...updated }));
-      setOwnerName(editName.trim());
-      setCompanyName(editCompany.trim());
-      setPhone(editPhone.trim());
+      setOwnerName(editAadhaarName.trim());
+      setCompanyName(editMartName.trim());
+      setPhone(editPrimaryMobile.trim());
       setIsEditProfileOpen(false);
-      showToast('Owner profile details updated successfully!');
+      showToast('Rural Mart and entrepreneur profile updated successfully!');
     } catch (error) {
       setProfileError(
         error && typeof error === 'object' && 'message' in error
@@ -241,9 +364,9 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
         </button>
       </div>
 
-      {/* THREE INFO CARDS (Row below profile banner) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        
+      {/* TWO INFO CARDS (Row below profile banner - Security card removed) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
         {/* Card 1: Business Entity */}
         <div className="card-enterprise p-4 sm:p-5 space-y-3">
           <div className="flex items-center gap-2 border-b border-[#E9EFEB] dark:border-[#16241E] pb-3">
@@ -322,88 +445,11 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
           </div>
         </div>
 
-        {/* Card 3: Security & Auth */}
-        <div className="card-enterprise p-4 sm:p-5 space-y-3">
-          <div className="flex items-center gap-2 border-b border-[#E9EFEB] dark:border-[#16241E] pb-3">
-            <ShieldCheck className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5]" />
-            <h3 className="text-xs font-bold text-[#17221D] dark:text-[#E6ECE8] uppercase tracking-wider">
-              SECURITY & AUTH
-            </h3>
-          </div>
-
-          <div className="space-y-3 text-xs">
-            {/* Two-Factor Authentication Row */}
-            <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] flex items-center justify-between">
-              <div>
-                <span className="font-bold text-[#17221D] dark:text-[#E6ECE8] block">
-                  Two-Factor Authentication
-                </span>
-                <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">
-                  Require SMS / App OTP
-                </span>
-              </div>
-
-              {/* Toggle Switch */}
-              <button
-                type="button"
-                onClick={() => {
-                  setTwoFactorEnabled(!twoFactorEnabled);
-                  showToast(
-                    !twoFactorEnabled
-                      ? 'Two-Factor Authentication enabled.'
-                      : 'Two-Factor Authentication disabled.'
-                  );
-                }}
-                className={`w-11 h-6 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-                  twoFactorEnabled
-                    ? 'bg-[#174F3A] dark:bg-[#A3E6C5]'
-                    : 'bg-slate-300 dark:bg-slate-700'
-                }`}
-              >
-                <div
-                  className={`w-5 h-5 rounded-full bg-white dark:bg-[#121E19] shadow-md transform transition-transform ${
-                    twoFactorEnabled ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Trusted Sessions Row */}
-            <button
-              type="button"
-              onClick={() => setIsChangePasswordOpen(true)}
-              className="w-full p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] flex items-center justify-between text-left hover:border-[#174F3A] transition-colors"
-            >
-              <div className="flex items-start gap-2.5">
-                <KeyRound className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5] shrink-0 mt-0.5" />
-                <div>
-                  <span className="font-bold text-[#17221D] dark:text-[#E6ECE8] block">Change Password</span>
-                  <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">Update your Supabase login password securely</span>
-                </div>
-              </div>
-              <span className="text-[11px] font-bold text-[#174F3A] dark:text-[#A3E6C5]">Change</span>
-            </button>
-
-            {/* Trusted Sessions Row */}
-            <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] flex items-start gap-2.5">
-              <Lock className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5] shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-[#17221D] dark:text-[#E6ECE8] block">
-                  Trusted Sessions
-                </span>
-                <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">
-                  3 Active Devices (Android POS Terminal, Chrome Web, Tablet)
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
       </div>
 
       {/* BOTTOM SECTION: Audit Log & Help Support */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        
+
         {/* BOTTOM-LEFT: Recent System Audit Log */}
         <div className="lg:col-span-7 card-enterprise p-4 sm:p-5 space-y-3">
           <div className="flex items-center justify-between border-b border-[#E9EFEB] dark:border-[#16241E] pb-3">
@@ -472,15 +518,15 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
 
       </div>
 
-      {/* MODAL: EDIT OWNER PROFILE */}
+      {/* MODAL: EDIT OWNER PROFILE — mirrors the Registration form's two sections */}
       {isEditProfileOpen && (
         <div className="fixed inset-0 z-50 bg-[#17221D]/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#121E19] border border-[#DDE6E0] dark:border-[#1E3129] rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
-            
-            <div className="flex items-center justify-between border-b border-[#E9EFEB] dark:border-[#16241E] pb-3">
+          <div className="bg-white dark:bg-[#121E19] border border-[#DDE6E0] dark:border-[#1E3129] rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+
+            <div className="flex items-center justify-between border-b border-[#E9EFEB] dark:border-[#16241E] px-6 py-4 shrink-0">
               <h3 className="text-base font-bold text-[#17221D] dark:text-[#E6ECE8] flex items-center gap-2">
                 <User className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5]" />
-                <span>Edit Owner Profile</span>
+                <span>Edit Rural Mart & Entrepreneur Profile</span>
               </h3>
               <button
                 onClick={() => setIsEditProfileOpen(false)}
@@ -490,77 +536,243 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveProfile} className="space-y-3">
-              {/* Rural Mart ID */}
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                  Rural Mart ID
-                </label>
-                <input
-                  type="text"
-                  disabled
-                  value={displayedOwnerId}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-slate-100 dark:bg-slate-800/80 text-slate-500 font-mono cursor-not-allowed"
-                />
+            <form onSubmit={handleSaveProfile} className="overflow-y-auto px-6 py-4 space-y-6">
+
+              {editFormError && (
+                <div className="p-2.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-[11px] font-semibold flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{editFormError}</span>
+                </div>
+              )}
+
+              {/* ============ SECTION 1: RURAL MART / SHOP DETAILS ============ */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 border-b border-[#E9EFEB] dark:border-[#16241E] pb-2">
+                  <Store className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5]" />
+                  <h4 className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">
+                    1. Rural Mart / Shop Details
+                  </h4>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Rural Mart ID — READ ONLY */}
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Rural Mart ID</label>
+                    <input type="text" disabled value={displayedOwnerId} className={`${fieldInputDisabledClass} font-mono`} />
+                  </div>
+
+                  {/* Registered Email — READ ONLY */}
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Registered Email ID</label>
+                    <input type="email" disabled value={editEmail} className={fieldInputDisabledClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Rural Mart Name <span className="text-red-500">*</span></label>
+                    <input type="text" required value={editMartName} onChange={(e) => setEditMartName(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Mobile Number <span className="text-red-500">*</span></label>
+                    <input type="tel" required value={editMartMobile} onChange={(e) => setEditMartMobile(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>District <span className="text-red-500">*</span></label>
+                    <select required value={editDistrict} onChange={(e) => setEditDistrict(e.target.value)} className={fieldInputClass}>
+                      <option value="" disabled>Select district</option>
+                      {TAMIL_NADU_DISTRICTS.map((d) => (
+                        <option key={d} value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Block <span className="text-red-500">*</span></label>
+                    <input type="text" required value={editBlock} onChange={(e) => setEditBlock(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Village <span className="text-red-500">*</span></label>
+                    <input type="text" required value={editVillage} onChange={(e) => setEditVillage(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Opening Date <span className="text-red-500">*</span></label>
+                    <input type="date" required value={editOpeningDate} onChange={(e) => setEditOpeningDate(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className={fieldLabelClass}>Physical Address <span className="text-red-500">*</span></label>
+                    <textarea required rows={2} value={editPhysicalAddress} onChange={(e) => setEditPhysicalAddress(e.target.value)} className={fieldTextareaClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>GST Number</label>
+                    <input type="text" value={editGstNumber} onChange={(e) => setEditGstNumber(e.target.value)} className={fieldInputClass} placeholder="e.g. 33AAAAA0000A1Z5" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Rural Mart Photo</label>
+                    <label className={fieldFileWrapClass}>
+                      <span>Choose file</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => setEditMartPhoto(e.target.files?.[0] ?? null)}
+                      />
+                    </label>
+                    <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96] ml-1">
+                      {editMartPhoto ? editMartPhoto.name : 'No new file chosen'}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {/* Owner Name */}
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                  Owner Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                />
+              {/* ============ SECTION 2: ENTREPRENEUR / FARMER PERSONAL DETAILS ============ */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 border-b border-[#E9EFEB] dark:border-[#16241E] pb-2">
+                  <UserCircle2 className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5]" />
+                  <h4 className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">
+                    2. Entrepreneur Details
+                  </h4>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Name (as per Aadhaar) <span className="text-red-500">*</span></label>
+                    <input type="text" required value={editAadhaarName} onChange={(e) => setEditAadhaarName(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Primary Mobile Number <span className="text-red-500">*</span></label>
+                    <input type="tel" required value={editPrimaryMobile} onChange={(e) => setEditPrimaryMobile(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Secondary Mobile Number</label>
+                    <input type="tel" value={editSecondaryMobile} onChange={(e) => setEditSecondaryMobile(e.target.value)} className={fieldInputClass} placeholder="Optional" />
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Email ID</label>
+                    <input
+                      type="email"
+                      value={editEmail}
+                      onChange={(e) => setEditEmail(e.target.value)}
+                      className={fieldInputClass}
+                      placeholder="Enter email address"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Date of Birth <span className="text-red-500">*</span></label>
+                    <input type="date" required value={editDob} onChange={(e) => setEditDob(e.target.value)} className={fieldInputClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Age</label>
+                    <input type="text" disabled value={editAge || '—'} className={fieldInputDisabledClass} />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Gender <span className="text-red-500">*</span></label>
+                    <select required value={editGender} onChange={(e) => setEditGender(e.target.value)} className={fieldInputClass}>
+                      <option value="" disabled>Select gender</option>
+                      <option value="Female">Female</option>
+                      <option value="Male">Male</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Qualification <span className="text-red-500">*</span></label>
+                    <input type="text" required value={editQualification} onChange={(e) => setEditQualification(e.target.value)} className={fieldInputClass} placeholder="e.g. B.Sc. Agriculture" />
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className={fieldLabelClass}>Address (Permanent) <span className="text-red-500">*</span></label>
+                    <textarea required rows={2} value={editAddressPermanent} onChange={(e) => setEditAddressPermanent(e.target.value)} className={fieldTextareaClass} />
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className={fieldLabelClass}>Address (Temporary)</label>
+                    <textarea rows={2} value={editAddressTemporary} onChange={(e) => setEditAddressTemporary(e.target.value)} className={fieldTextareaClass} placeholder="Optional, if different from permanent address" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Aadhaar Number <span className="text-red-500">*</span></label>
+                    <input type="text" required value={editAadhaarNumber} onChange={(e) => setEditAadhaarNumber(e.target.value)} className={fieldInputClass} placeholder="1234 5678 9012" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>PAN Number <span className="text-red-500">*</span></label>
+                    <input type="text" required value={editPanNumber} onChange={(e) => setEditPanNumber(e.target.value.toUpperCase())} className={fieldInputClass} placeholder="ABCDE1234F" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className={fieldLabelClass}>Entrepreneur Selfie</label>
+                    <label className={fieldFileWrapClass}>
+                      <span>Choose file</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => setEditSelfie(e.target.files?.[0] ?? null)}
+                      />
+                    </label>
+                    <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96] ml-1">
+                      {editSelfie ? editSelfie.name : 'No new file chosen'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bank Details */}
+                <div className="pt-2 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Landmark className="w-3.5 h-3.5 text-[#174F3A] dark:text-[#A3E6C5]" />
+                    <span className="text-[11px] font-bold text-[#66736C] dark:text-[#8E9E96] uppercase tracking-wider">Bank Details</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className={fieldLabelClass}>Bank Account Number <span className="text-red-500">*</span></label>
+                      <input type="text" required value={editBankAccountNumber} onChange={(e) => setEditBankAccountNumber(e.target.value)} className={fieldInputClass} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className={fieldLabelClass}>IFSC Code <span className="text-red-500">*</span></label>
+                      <input type="text" required value={editIfscCode} onChange={(e) => setEditIfscCode(e.target.value.toUpperCase())} className={fieldInputClass} placeholder="e.g. SBIN0001234" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className={fieldLabelClass}>Bank Name <span className="text-red-500">*</span></label>
+                      <input type="text" required value={editBankName} onChange={(e) => setEditBankName(e.target.value)} className={fieldInputClass} placeholder="e.g. State Bank of India" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className={fieldLabelClass}>Branch <span className="text-red-500">*</span></label>
+                      <input type="text" required value={editBranch} onChange={(e) => setEditBranch(e.target.value)} className={fieldInputClass} placeholder="e.g. Erode Main Branch" />
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              {/* Company Name */}
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                  Company Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editCompany}
-                  onChange={(e) => setEditCompany(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                />
-              </div>
-
-              {/* Registered Email */}
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                  Registered Email
-                </label>
-                <input
-                  type="email"
-                  disabled
-                  value={displayedEmail}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-slate-100 dark:bg-slate-800/80 text-slate-500 cursor-not-allowed"
-                />
-              </div>
-
-              {/* Phone Number */}
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                  Phone Number <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editPhone}
-                  onChange={(e) => setEditPhone(e.target.value)}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                />
-              </div>
+              {/* Password change shortcut, kept separate from the profile fields */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditProfileOpen(false);
+                  setIsChangePasswordOpen(true);
+                }}
+                className="w-full p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] flex items-center justify-between text-left hover:border-[#174F3A] transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <KeyRound className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5] shrink-0" />
+                  <span className="font-bold text-[#17221D] dark:text-[#E6ECE8] text-xs">Change Password</span>
+                </div>
+                <span className="text-[11px] font-bold text-[#174F3A] dark:text-[#A3E6C5]">Change</span>
+              </button>
 
               {/* Modal Actions */}
-              <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#E9EFEB] dark:border-[#16241E]">
+              <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#E9EFEB] dark:border-[#16241E] sticky bottom-0 bg-white dark:bg-[#121E19]">
                 <button
                   type="button"
                   onClick={() => setIsEditProfileOpen(false)}
@@ -599,7 +811,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
       {isContactSupportOpen && (
         <div className="fixed inset-0 z-50 bg-[#17221D]/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#121E19] border border-[#DDE6E0] dark:border-[#1E3129] rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
-            
+
             <div className="flex items-center justify-between border-b border-[#E9EFEB] dark:border-[#16241E] pb-3">
               <h3 className="text-base font-bold text-[#17221D] dark:text-[#E6ECE8] flex items-center gap-2">
                 <Headphones className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5]" />
@@ -617,7 +829,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
             </div>
 
             <form onSubmit={handleSubmitSupport} className="space-y-3">
-              
+
               {/* Subject / Issue Category */}
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">

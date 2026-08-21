@@ -1,14 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { getOutreachByRuralMart, getFarmers } from '../../shared/dataServices';
-import {
-  createOwnerOutreachProgram,
-  deleteOwnerOutreachProgram,
-  getOwnerOutreachPrograms,
-  getOutreachRegisteredFarmers,
-  getRegisteredFarmerCount,
-  OutreachRegisteredFarmer,
-  updateOwnerOutreachProgram,
-} from '../services/outreachService';
+import React, { useState, useMemo, useEffect } from 'react';
+import { saveOutreachProgram, getOutreachByRuralMart, getFarmers, updateOutreachProgram, deleteOutreachProgram } from '../../shared/dataServices';
 import {
   Users,
   Plus,
@@ -34,7 +25,6 @@ interface FarmerOutreachPageProps {
   currentMartId?: string | null;
   theme: 'light' | 'dark';
   searchQuery?: string;
-  dateRange: string;
 }
 
 interface SessionLogEntry {
@@ -50,14 +40,32 @@ interface SessionLogEntry {
   existing: number;
   newLeads: number;
   photos?: string[];
+  stakeholder?: string;
 }
 
 const INITIAL_SESSION_LOGS: SessionLogEntry[] = [];
 
+interface FarmerEntryRow {
+  id: string;
+  name: string;
+  mobile: string;
+  place: string;
+  profession: 'Farmer' | 'Commercial';
+}
+
+interface FarmerOutreachRecord {
+  id: string;
+  date: string;
+  displayDate: string;
+  farmers: FarmerEntryRow[];
+  farmersAttended: number;
+  villagesCovered: number;
+  savedAt: string;
+}
+
 export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   currentMartId,
   theme,
-  dateRange,
 }) => {
   // Session Logs
   const [sessionLogs, setSessionLogs] = useState<SessionLogEntry[]>(() => {
@@ -80,46 +88,7 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
     }
     return [];
   });
-  const [saveError, setSaveError] = useState('');
-  const [registeredFarmerCount, setRegisteredFarmerCount] = useState(0);
-  const [registeredFarmers, setRegisteredFarmers] = useState<OutreachRegisteredFarmer[]>([]);
   const [isLogsModalOpen, setIsLogsModalOpen] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    if (!currentMartId) return;
-    setSaveError('');
-    void Promise.all([
-      getOwnerOutreachPrograms(currentMartId),
-      getRegisteredFarmerCount(currentMartId),
-      getOutreachRegisteredFarmers(currentMartId),
-    ])
-      .then(([rows, farmerCount, farmerRows]) => {
-        if (!active) return;
-        setRegisteredFarmerCount(farmerCount);
-        setRegisteredFarmers(farmerRows);
-        setSessionLogs(rows.map((row) => ({
-          id: row.id,
-          title: `${row.activity_type} - ${row.village}`,
-          activityType: row.activity_type,
-          village: row.village,
-          date: row.program_date,
-          status: 'COMPLETED',
-          description: row.activity_brief || '—',
-          topics: row.topics_covered || [],
-          attended: row.reported_attendance_count || 0,
-          existing: Math.max(0, (row.reported_attendance_count || 0) - (row.reported_new_leads_count || 0)),
-          newLeads: row.reported_new_leads_count || 0,
-          photos: [],
-        })));
-      })
-      .catch((error: unknown) => setSaveError(
-        error && typeof error === 'object' && 'message' in error
-          ? String((error as { message: unknown }).message)
-          : 'Unable to load outreach sessions.',
-      ));
-    return () => { active = false; };
-  }, [currentMartId]);
 
   // Photo upload & View/Edit/Delete Modal states
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
@@ -170,9 +139,8 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   const [selectedActivity, setSelectedActivity] = useState('Product Demonstration');
   const [selectedVillage, setSelectedVillage] = useState(defaultVillagesList[0] || 'Athani GP');
   const [description, setDescription] = useState('');
+  const [stakeholder, setStakeholder] = useState('');
   const [farmersAttended, setFarmersAttended] = useState('');
-  const [attendeeSearch, setAttendeeSearch] = useState('');
-  const [selectedRegisteredAttendeeIds, setSelectedRegisteredAttendeeIds] = useState<string[]>([]);
 
   // Topics Chips / Tags
   const [topics, setTopics] = useState<string[]>([]);
@@ -182,71 +150,132 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   // Toast State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Aggregate-only workflow: the owner reports total attendance and how many
-  // attendees were already registered. New leads are the exact remainder.
+  // Village Farmer Data Collection (date-wise Excel-like entry) — new, separate from the
+  // existing "Record Village Outreach & Farmer Event" form and its session logs above.
+  const farmerOutreachStorageKey = `ruralmart_farmer_outreach_records_${currentMartId || 'default'}`;
+
+  const [farmerOutreachRecords, setFarmerOutreachRecords] = useState<FarmerOutreachRecord[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(farmerOutreachStorageKey);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Persist saved outreach records so they survive page refreshes/navigation
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(farmerOutreachStorageKey, JSON.stringify(farmerOutreachRecords));
+    } catch {
+      // localStorage unavailable — records simply won't persist across reloads
+    }
+  }, [farmerOutreachRecords, farmerOutreachStorageKey]);
+
+  const [collectionDate, setCollectionDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [isCollectionEntryOpen, setIsCollectionEntryOpen] = useState(false);
+  const makeBlankFarmerRow = (): FarmerEntryRow => ({
+    id: `frow-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: '',
+    mobile: '',
+    place: '',
+    profession: 'Farmer',
+  });
+  const [activeFarmerRows, setActiveFarmerRows] = useState<FarmerEntryRow[]>([makeBlankFarmerRow()]);
+  const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
+
+  const formatCollectionDate = (dateStr: string) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+
+  // Loads the saved farmer rows for a date (if one exists) so entry can continue, or starts blank
+  const loadRowsForDate = (dateValue: string) => {
+    const existing = farmerOutreachRecords.find((r) => r.date === dateValue);
+    if (existing && existing.farmers.length > 0) {
+      setActiveFarmerRows(existing.farmers.map((f) => ({ ...f })));
+    } else {
+      setActiveFarmerRows([makeBlankFarmerRow()]);
+    }
+  };
+
+  const handleCollectionDateChange = (value: string) => {
+    setCollectionDate(value);
+    loadRowsForDate(value);
+    setIsCollectionEntryOpen(true);
+  };
+
+  const handleAddFarmerRow = () => {
+    setActiveFarmerRows((prev) => [...prev, makeBlankFarmerRow()]);
+  };
+
+  const handleFarmerRowChange = (
+    id: string,
+    field: 'name' | 'mobile' | 'place' | 'profession',
+    value: string
+  ) => {
+    setActiveFarmerRows((prev) => prev.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
+  };
+
+  const handleRemoveFarmerRow = (id: string) => {
+    setActiveFarmerRows((prev) => (prev.length > 1 ? prev.filter((row) => row.id !== id) : prev));
+  };
+
+  const handleSaveOutreachCollection = () => {
+    const validRows = activeFarmerRows.filter((r) => r.name.trim() !== '');
+    if (validRows.length === 0) {
+      setToastMessage('Please enter at least one farmer record before saving.');
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+    const placesCovered = new Set(validRows.map((r) => r.place.trim()).filter((v) => v !== '')).size;
+
+    setFarmerOutreachRecords((prev) => {
+      const existingIndex = prev.findIndex((r) => r.date === collectionDate);
+      const recordFields = {
+        date: collectionDate,
+        displayDate: formatCollectionDate(collectionDate),
+        farmers: validRows,
+        farmersAttended: validRows.length,
+        villagesCovered: placesCovered,
+        savedAt: new Date().toISOString(),
+      };
+      if (existingIndex >= 0) {
+        // Same date already has a record — update it in place instead of duplicating
+        const updated = [...prev];
+        updated[existingIndex] = { ...prev[existingIndex], ...recordFields };
+        return updated;
+      }
+      return [{ id: `foc-${Date.now()}`, ...recordFields }, ...prev];
+    });
+
+    setIsCollectionEntryOpen(false);
+    setToastMessage(`Outreach data for ${formatCollectionDate(collectionDate)} saved — ${validRows.length} farmers recorded.`);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleToggleExpandRecord = (id: string) => {
+    setExpandedRecordId((prev) => (prev === id ? null : id));
+  };
+
+  // Auto-calculated new potential leads
   const attendedNumber = parseInt(farmersAttended, 10);
   const isNumeric = !isNaN(attendedNumber);
-  const validAttendance = isNumeric ? Math.max(0, attendedNumber) : 0;
-  const calculatedExistingFarmers = selectedRegisteredAttendeeIds.length;
-  const calculatedNewLeads = Math.max(0, validAttendance - calculatedExistingFarmers);
-  const matchingRegisteredFarmers = useMemo(() => {
-    const query = attendeeSearch.trim().toLowerCase();
-    const mobileQuery = query.replace(/\D/g, '');
-    return query ? registeredFarmers.filter((farmer) =>
-      farmer.farmer_code.toLowerCase().includes(query) ||
-      farmer.name.toLowerCase().includes(query) ||
-      (mobileQuery.length > 0 && farmer.mobile.replace(/\D/g, '').includes(mobileQuery))
-    ).slice(0, 8) : [];
-  }, [attendeeSearch, registeredFarmers]);
+  // Calculation formula: if valid number, calculated leads (e.g. 35% of total or attended minus baseline)
+  // handles negative values if negative number is entered
+  const calculatedNewLeads = isNumeric
+    ? Math.round(attendedNumber * 0.35)
+    : 0;
 
-  // Header-selected period drives every outreach KPI.
-  const periodSessionLogs = useMemo(() => {
-    const localIso = (date: Date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-    const now = new Date();
-    let start = '0001-01-01';
-    let end = '9999-12-31';
-    const today = localIso(now);
-
-    if (dateRange === 'Today') {
-      start = today;
-      end = today;
-    } else if (dateRange === 'Last 7 Days' || dateRange === 'Last 30 Days') {
-      const days = dateRange === 'Last 7 Days' ? 7 : 30;
-      start = localIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - days + 1));
-      end = today;
-    } else {
-      const monthMatch = dateRange.match(/This Month \(([A-Za-z]+) (\d{4})\)/);
-      const explicitMatch = dateRange.match(/^[A-Za-z]{3}, ([A-Za-z]{3}) (\d{1,2}), (\d{4})$/);
-      if (monthMatch) {
-        const monthIndex = new Date(`${monthMatch[1]} 1, ${monthMatch[2]}`).getMonth();
-        const year = Number(monthMatch[2]);
-        start = localIso(new Date(year, monthIndex, 1));
-        end = localIso(new Date(year, monthIndex + 1, 0));
-      } else if (explicitMatch) {
-        const selected = localIso(new Date(`${explicitMatch[1]} ${explicitMatch[2]}, ${explicitMatch[3]}`));
-        start = selected;
-        end = selected;
-      }
-    }
-
-    return sessionLogs.filter((log) => {
-      // Supabase returns YYYY-MM-DD, while older in-memory entries used a
-      // display-formatted date such as "17 Aug 2026". Normalize both before
-      // applying the header period so a newly saved row updates KPIs instantly.
-      const parsed = /^\d{4}-\d{2}-\d{2}$/.test(log.date) ? log.date : localIso(new Date(log.date));
-      return parsed >= start && parsed <= end;
-    });
-  }, [sessionLogs, dateRange]);
-
-  // Total summary metrics dynamically reflecting Supabase rows in that period.
-  const totalSessions = periodSessionLogs.length;
-  const totalFarmersReached = periodSessionLogs.reduce((acc, curr) => acc + curr.attended, 0);
-  const totalNewLeads = periodSessionLogs.reduce((acc, curr) => acc + curr.newLeads, 0);
+  // Total summary metrics dynamically reflecting logs
+  const totalSessions = sessionLogs.length;
+  const totalFarmersReached =
+    sessionLogs.reduce((acc, curr) => acc + curr.attended, 0) +
+    farmerOutreachRecords.reduce((acc, curr) => acc + curr.farmersAttended, 0);
+  const totalNewLeads = sessionLogs.reduce((acc, curr) => acc + curr.newLeads, 0);
   const conversionRate = totalFarmersReached > 0 ? `${((totalNewLeads / totalFarmersReached) * 100).toFixed(1)}%` : '0%';
   const directSalesValue = '₹0';
 
@@ -314,9 +343,8 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
     setSelectedActivity('Product Demonstration');
     setSelectedVillage('');
     setDescription('');
+    setStakeholder('');
     setFarmersAttended('');
-    setAttendeeSearch('');
-    setSelectedRegisteredAttendeeIds([]);
     setTopics([]);
     setUploadedPhotos([]);
     setIsAddingActivity(false);
@@ -325,63 +353,52 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
   };
 
   // Save Outreach Session
-  const handleSaveSession = async (e: React.FormEvent) => {
+  const handleSaveSession = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!currentMartId) {
-      setSaveError('Your owner account is not linked to a Rural Mart.');
-      return;
-    }
-    if (!selectedVillage.trim()) {
-      setSaveError('Village is required.');
-      return;
-    }
-    if (selectedRegisteredAttendeeIds.length > validAttendance) {
-      setSaveError('Verified registered attendees cannot exceed total farmers attended.');
-      return;
-    }
-
-    let savedProgram;
-    try {
-      setSaveError('');
-      savedProgram = await createOwnerOutreachProgram({
-        ruralMartId: currentMartId,
-        date: sessionDate,
-        activityType: selectedActivity,
-        description,
-        village: selectedVillage,
-        topics,
-        attended: isNumeric ? attendedNumber : 0,
-        attendingFarmerCodes: selectedRegisteredAttendeeIds
-          .map((farmerId) => registeredFarmers.find((farmer) => farmer.id === farmerId)?.farmer_code)
-          .filter((code): code is string => Boolean(code)),
-      });
-    } catch (error) {
-      setSaveError(error && typeof error === 'object' && 'message' in error
-        ? String((error as { message: unknown }).message)
-        : 'Unable to save the outreach session.');
-      return;
-    }
+    const formattedDateStr = sessionDate ? new Date(sessionDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 
     const newEntry: SessionLogEntry = {
-      id: savedProgram.id,
+      id: `log-${Date.now()}`,
       title: `${selectedActivity} - ${selectedVillage}`,
       activityType: selectedActivity,
       village: selectedVillage,
-      date: sessionDate,
+      date: formattedDateStr,
       status: 'COMPLETED',
       description: description || '—',
       topics: [...topics],
-      attended: savedProgram.reported_attendance_count || 0,
-      existing: Math.max(
-        0,
-        (savedProgram.reported_attendance_count || 0) - (savedProgram.reported_new_leads_count || 0)
-      ),
-      newLeads: savedProgram.reported_new_leads_count || 0,
+      attended: isNumeric ? attendedNumber : 0,
+      existing: isNumeric ? Math.max(0, attendedNumber - calculatedNewLeads) : 0,
+      newLeads: calculatedNewLeads,
       photos: [...uploadedPhotos],
+      stakeholder: stakeholder.trim(),
     };
 
     setSessionLogs((prev) => [newEntry, ...prev]);
+
+    // Persist outreach program to shared storage
+    saveOutreachProgram({
+      id: newEntry.id,
+      ruralMartId: currentMartId || '',
+      programName: newEntry.title,
+      programDate: formattedDateStr,
+      farmersReached: isNumeric ? attendedNumber : 0,
+      villagesCovered: 1,
+      animalPopulationCovered: 0,
+      title: newEntry.title,
+      activityType: selectedActivity,
+      village: selectedVillage,
+      district: 'Erode',
+      date: formattedDateStr,
+      status: 'Completed',
+      description: newEntry.description,
+      farmersAttended: isNumeric ? attendedNumber : 0,
+      newLeadsCount: calculatedNewLeads,
+      existingFarmersCount: isNumeric ? Math.max(0, attendedNumber - calculatedNewLeads) : 0,
+      topicsCovered: topics.join(', '),
+      topics: [...topics],
+      photos: [...uploadedPhotos],
+    });
 
     setToastMessage(`Outreach Session for "${selectedVillage}" saved successfully!`);
     setTimeout(() => setToastMessage(null), 4000);
@@ -391,11 +408,6 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
 
   return (
     <div className="space-y-4">
-      {saveError && (
-        <div className="p-3.5 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-semibold">
-          {saveError}
-        </div>
-      )}
       {/* Toast Notification */}
       {toastMessage && (
         <div className="p-3.5 rounded-xl bg-[#174F3A] text-white text-xs font-bold shadow-lg border border-emerald-500/30 flex items-center justify-between animate-fade-in transition-all">
@@ -583,67 +595,21 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
 
             {/* Field 3: Village / Gram Panchayat */}
             <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                  Village / Gram Panchayat <span className="text-red-500">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setIsAddingVillage(!isAddingVillage)}
-                  className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 hover:underline cursor-pointer"
-                >
-                  {isAddingVillage ? '← Select from Dropdown' : '+ Type Custom Name'}
-                </button>
-              </div>
+              <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
+                Village / Gram Panchayat <span className="text-red-500">*</span>
+              </label>
 
-              {!isAddingVillage ? (
-                <select
-                  value={selectedVillage}
-                  onChange={(e) => {
-                    if (e.target.value === '__ADD_NEW__') {
-                      setIsAddingVillage(true);
-                    } else {
-                      setSelectedVillage(e.target.value);
-                    }
-                  }}
-                  className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                >
-                  {villages.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                  <option value="__ADD_NEW__">+ Type Custom Village / Gram Panchayat...</option>
-                </select>
-              ) : (
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    autoFocus
-                    placeholder="Enter Custom Village or Gram Panchayat (e.g. Athani GP)..."
-                    value={newVillageInput}
-                    onChange={(e) => setNewVillageInput(e.target.value)}
-                    className="flex-1 h-9 px-3 text-xs rounded-xl border border-[#174F3A] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddVillage}
-                    className="h-9 px-3 bg-[#174F3A] text-white text-xs font-bold rounded-xl cursor-pointer hover:bg-[#103A2B]"
-                  >
-                    Set
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsAddingVillage(false);
-                      setNewVillageInput('');
-                    }}
-                    className="h-9 px-2.5 border border-[#DDE6E0] dark:border-[#1E3129] text-xs font-semibold rounded-xl text-slate-500 hover:bg-[#F8FAF7]"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
+              <select
+                value={selectedVillage}
+                onChange={(e) => setSelectedVillage(e.target.value)}
+                className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
+              >
+                {villages.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -662,100 +628,33 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
             />
           </div>
 
-          {/* Attendance totals + exact auto-calculated new leads */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-center">
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                Total Farmers Attended <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                required
-                min="0"
-                placeholder="e.g. 65"
-                value={farmersAttended}
-                onChange={(e) => setFarmersAttended(e.target.value)}
-                className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-              />
-            </div>
+          {/* Stakeholder */}
+          <div className="space-y-1">
+            <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
+              Stakeholder
+            </label>
+            <input
+              type="text"
+              placeholder="Enter stakeholder name..."
+              value={stakeholder}
+              onChange={(e) => setStakeholder(e.target.value)}
+              className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
+            />
+          </div>
 
-            <div className="space-y-1">
-              <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
-                Search Registered Attendees
-              </label>
-              <input
-                type="search"
-                placeholder="Enter Farmer ID (e.g. FMR-000001)"
-                value={attendeeSearch}
-                onChange={(e) => setAttendeeSearch(e.target.value)}
-                className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-              />
-              <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96]">
-                {selectedRegisteredAttendeeIds.length} selected from {registeredFarmerCount} registered farmers
-              </span>
-              {attendeeSearch.trim() && (
-                <div className="max-h-40 overflow-y-auto rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-white dark:bg-[#121E19] shadow-lg">
-                  {matchingRegisteredFarmers.length > 0 ? matchingRegisteredFarmers.map((farmer) => {
-                    const selected = selectedRegisteredAttendeeIds.includes(farmer.id);
-                    return (
-                      <button
-                        key={farmer.id}
-                        type="button"
-                        disabled={selected}
-                        onClick={() => {
-                          setSelectedRegisteredAttendeeIds((current) => [...current, farmer.id]);
-                          setAttendeeSearch('');
-                        }}
-                        className="w-full px-3 py-2 text-left text-xs border-b last:border-b-0 border-[#E9EFEB] dark:border-[#1E3129] hover:bg-[#E7F2EC] dark:hover:bg-[#1B3D30] disabled:opacity-50"
-                      >
-                        <span className="font-bold block">{farmer.farmer_code} · {farmer.name}</span>
-                        <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96]">
-                          {farmer.mobile}{farmer.village ? ` · ${farmer.village}` : ''}{selected ? ' · Already selected' : ''}
-                        </span>
-                      </button>
-                    );
-                  }) : (
-                    <div className="px-3 py-2 text-xs text-[#66736C] dark:text-[#8E9E96]">No registered farmer found.</div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Live Auto Calculated Box */}
-            <div className="p-3 rounded-xl bg-[#E7F2EC] dark:bg-[#1B3D30]/60 border border-[#A3E6C5]/40 dark:border-[#1E3129] flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-[#174F3A] dark:text-[#A3E6C5] tracking-wider uppercase block">
-                  AUTO CALCULATED NEW POTENTIAL LEADS
-                </span>
-                <span className="text-xs text-[#66736C] dark:text-[#8E9E96]">
-                  Backend: total attended minus {calculatedExistingFarmers} verified attendees
-                </span>
-              </div>
-              <div className="text-xl font-extrabold text-[#174F3A] dark:text-[#A3E6C5]">
-                {calculatedNewLeads > 0 ? `+${calculatedNewLeads}` : calculatedNewLeads} <span className="text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">New Farmers</span>
-              </div>
-            </div>
-
-            {selectedRegisteredAttendeeIds.length > 0 && (
-              <div className="lg:col-span-3 flex flex-wrap gap-2">
-                {selectedRegisteredAttendeeIds.map((farmerId) => {
-                  const farmer = registeredFarmers.find((item) => item.id === farmerId);
-                  if (!farmer) return null;
-                  return (
-                    <span key={farmerId} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#E7F2EC] dark:bg-[#1B3D30] text-xs font-semibold text-[#174F3A] dark:text-[#A3E6C5]">
-                      {farmer.farmer_code} · {farmer.name}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedRegisteredAttendeeIds((current) => current.filter((id) => id !== farmerId))}
-                        aria-label={`Remove ${farmer.name}`}
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
+          {/* Total Farmers Attended */}
+          <div className="space-y-1">
+            <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
+              Total Farmers Attended <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="number"
+              required
+              placeholder="e.g. 65"
+              value={farmersAttended}
+              onChange={(e) => setFarmersAttended(e.target.value)}
+              className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
+            />
           </div>
 
           {/* Topics Covered in Session (Tags / Chips Input) */}
@@ -885,6 +784,233 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
             </button>
           </div>
         </form>
+      </div>
+
+      {/* NEW SECTION: Village Farmer Data Collection — date-wise, Excel-like farmer entry.
+          Fully separate from the "Record Village Outreach & Farmer Event" form above. */}
+      <div className="card-enterprise p-4 sm:p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E9EFEB] dark:border-[#16241E] pb-3">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5]" />
+            <h2 className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8] uppercase tracking-wider">
+              Village Farmer Data Collection
+            </h2>
+          </div>
+          <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">
+            Log individual farmer attendance per outreach date
+          </span>
+        </div>
+
+        {/* Date picker to start / open an entry sheet for a specific outreach date */}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+          <div className="space-y-1 w-full sm:w-56">
+            <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
+              Outreach Date
+            </label>
+            <input
+              type="date"
+              value={collectionDate}
+              onChange={(e) => handleCollectionDateChange(e.target.value)}
+              className="w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
+            />
+          </div>
+          {!isCollectionEntryOpen && (
+            <button
+              type="button"
+              onClick={() => {
+                loadRowsForDate(collectionDate);
+                setIsCollectionEntryOpen(true);
+              }}
+              className="h-9 px-4 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] dark:hover:bg-[#234F3F] text-white text-xs font-bold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Farmer Entry Sheet</span>
+            </button>
+          )}
+        </div>
+
+        {/* Excel-like editable table — visible only while an entry sheet is open */}
+        {isCollectionEntryOpen && (
+          <div className="space-y-3 pt-2 border-t border-[#E9EFEB] dark:border-[#16241E]">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
+                Farmer Records for {formatCollectionDate(collectionDate)}
+              </span>
+              <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">
+                {activeFarmerRows.filter((r) => r.name.trim() !== '').length} valid record(s)
+              </span>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-[#DDE6E0] dark:border-[#1E3129]">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-[#F8FAF7] dark:bg-[#16241E] text-left">
+                    <th className="py-2 px-3 w-10 text-[#66736C] dark:text-[#8E9E96] font-bold">#</th>
+                    <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Name</th>
+                    <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Mobile Number</th>
+                    <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Place</th>
+                    <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Profession</th>
+                    <th className="py-2 px-3 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeFarmerRows.map((row, idx) => (
+                    <tr key={row.id} className="border-t border-[#E9EFEB] dark:border-[#16241E]">
+                      <td className="py-1.5 px-3 text-[#66736C] dark:text-[#8E9E96]">{idx + 1}</td>
+                      <td className="py-1.5 px-2">
+                        <input
+                          type="text"
+                          placeholder="Full name"
+                          value={row.name}
+                          onChange={(e) => handleFarmerRowChange(row.id, 'name', e.target.value)}
+                          className="w-full h-8 px-2 text-xs rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-white dark:bg-[#0F1A15] text-[#17221D] dark:text-[#E6ECE8]"
+                        />
+                      </td>
+                      <td className="py-1.5 px-2">
+                        <input
+                          type="tel"
+                          placeholder="Mobile number"
+                          value={row.mobile}
+                          onChange={(e) => handleFarmerRowChange(row.id, 'mobile', e.target.value)}
+                          className="w-full h-8 px-2 text-xs rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-white dark:bg-[#0F1A15] text-[#17221D] dark:text-[#E6ECE8]"
+                        />
+                      </td>
+                      <td className="py-1.5 px-2">
+                        <input
+                          type="text"
+                          placeholder="Place"
+                          value={row.place}
+                          onChange={(e) => handleFarmerRowChange(row.id, 'place', e.target.value)}
+                          className="w-full h-8 px-2 text-xs rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-white dark:bg-[#0F1A15] text-[#17221D] dark:text-[#E6ECE8]"
+                        />
+                      </td>
+                      <td className="py-1.5 px-2">
+                        <select
+                          value={row.profession}
+                          onChange={(e) => handleFarmerRowChange(row.id, 'profession', e.target.value)}
+                          className="w-full h-8 px-2 text-xs rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-white dark:bg-[#0F1A15] text-[#17221D] dark:text-[#E6ECE8]"
+                        >
+                          <option value="Farmer">Farmer</option>
+                          <option value="Commercial">Commercial</option>
+                        </select>
+                      </td>
+                      <td className="py-1.5 px-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFarmerRow(row.id)}
+                          disabled={activeFarmerRows.length === 1}
+                          className="text-[#8A958F] hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                          title="Remove row"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <button
+                type="button"
+                onClick={handleAddFarmerRow}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold text-[#174F3A] dark:text-[#A3E6C5] border border-dashed border-[#174F3A]/40 dark:border-[#A3E6C5]/40 hover:bg-[#E7F2EC] dark:hover:bg-[#1B3D30] transition-colors cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Row</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCollectionEntryOpen(false);
+                    setActiveFarmerRows([makeBlankFarmerRow()]);
+                  }}
+                  className="h-9 px-4 rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] text-xs font-semibold text-[#66736C] dark:text-[#8E9E96] hover:bg-[#F8FAF7] dark:hover:bg-[#16241E] cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveOutreachCollection}
+                  className="h-9 px-5 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] dark:hover:bg-[#234F3F] text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Save Outreach</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Saved records — compact cards with Expand / Collapse */}
+        {farmerOutreachRecords.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-[#E9EFEB] dark:border-[#16241E]">
+            <span className="text-xs font-bold text-[#17221D] dark:text-[#E6ECE8] block">
+              Saved Outreach Records
+            </span>
+
+            {farmerOutreachRecords.map((record) => {
+              const isExpanded = expandedRecordId === record.id;
+              return (
+                <div
+                  key={record.id}
+                  className="rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] overflow-hidden"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                      <span className="text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
+                        {record.displayDate}
+                      </span>
+                      <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">
+                        Farmers Attended: <strong className="text-[#174F3A] dark:text-[#A3E6C5]">{record.farmersAttended}</strong>
+                      </span>
+                      <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96]">
+                        Places Covered: <strong className="text-[#17221D] dark:text-[#E6ECE8]">{record.villagesCovered}</strong>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleExpandRecord(record.id)}
+                      className="self-start sm:self-auto text-[11px] font-bold text-[#174F3A] dark:text-[#A3E6C5] hover:underline cursor-pointer"
+                    >
+                      {isExpanded ? '← Collapse' : 'Expand →'}
+                    </button>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="overflow-x-auto border-t border-[#DDE6E0] dark:border-[#1E3129]">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-white dark:bg-[#121E19] text-left">
+                            <th className="py-2 px-3 w-10 text-[#66736C] dark:text-[#8E9E96] font-bold">#</th>
+                            <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Name</th>
+                            <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Mobile Number</th>
+                            <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Place</th>
+                            <th className="py-2 px-3 text-[#66736C] dark:text-[#8E9E96] font-bold">Profession</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {record.farmers.map((f, idx) => (
+                            <tr key={f.id} className="border-t border-[#E9EFEB] dark:border-[#16241E]">
+                              <td className="py-1.5 px-3 text-[#66736C] dark:text-[#8E9E96]">{idx + 1}</td>
+                              <td className="py-1.5 px-3 text-[#17221D] dark:text-[#E6ECE8]">{f.name || '—'}</td>
+                              <td className="py-1.5 px-3 text-[#17221D] dark:text-[#E6ECE8]">{f.mobile || '—'}</td>
+                              <td className="py-1.5 px-3 text-[#17221D] dark:text-[#E6ECE8]">{f.place || '—'}</td>
+                              <td className="py-1.5 px-3 text-[#17221D] dark:text-[#E6ECE8]">{f.profession || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* MODAL: "OUTREACH SESSION LOGS" */}
@@ -1111,29 +1237,21 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
             </div>
 
             <form
-              onSubmit={async (e) => {
+              onSubmit={(e) => {
                 e.preventDefault();
                 if (!editLogItem) return;
-                try {
-                  await updateOwnerOutreachProgram(editLogItem.id, {
-                    activityType: editLogItem.activityType,
-                    village: editLogItem.village,
-                    description: editLogItem.description,
-                    topics: editLogItem.topics,
-                    attended: editLogItem.attended,
-                    newLeads: Math.min(editLogItem.attended, editLogItem.newLeads),
-                  });
-                  const correctedLog = {
-                    ...editLogItem,
-                    newLeads: Math.min(editLogItem.attended, editLogItem.newLeads),
-                    existing: Math.max(0, editLogItem.attended - editLogItem.newLeads),
-                  };
-                  setSessionLogs(sessionLogs.map((l) => (l.id === editLogItem.id ? correctedLog : l)));
-                } catch (error) {
-                  setSaveError(error && typeof error === 'object' && 'message' in error
-                    ? String((error as { message: unknown }).message) : 'Unable to update outreach session.');
-                  return;
-                }
+                const updatedLogs = sessionLogs.map((l) => (l.id === editLogItem.id ? editLogItem : l));
+                setSessionLogs(updatedLogs);
+                updateOutreachProgram(editLogItem.id, {
+                  title: editLogItem.title,
+                  activityType: editLogItem.activityType,
+                  village: editLogItem.village,
+                  description: editLogItem.description,
+                  farmersAttended: editLogItem.attended,
+                  newLeadsCount: editLogItem.newLeads,
+                  topics: editLogItem.topics,
+                  photos: editLogItem.photos,
+                });
                 setEditLogItem(null);
                 setToastMessage('Outreach session record updated.');
                 setTimeout(() => setToastMessage(null), 3000);
@@ -1229,14 +1347,8 @@ export const FarmerOutreachPage: React.FC<FarmerOutreachPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={async () => {
-                  try {
-                    await deleteOwnerOutreachProgram(deleteConfirmLogId);
-                  } catch (error) {
-                    setSaveError(error && typeof error === 'object' && 'message' in error
-                      ? String((error as { message: unknown }).message) : 'Unable to delete outreach session.');
-                    return;
-                  }
+                onClick={() => {
+                  deleteOutreachProgram(deleteConfirmLogId);
                   setSessionLogs((prev) => prev.filter((l) => l.id !== deleteConfirmLogId));
                   setDeleteConfirmLogId(null);
                   setToastMessage('Outreach session record deleted.');

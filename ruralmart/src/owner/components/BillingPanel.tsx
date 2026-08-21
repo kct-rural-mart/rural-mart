@@ -13,15 +13,15 @@ import {
   Receipt,
   ShoppingBag,
 } from 'lucide-react';
-import { BillLineItem } from '../../shared/dataServices';
-import { CanonicalProduct, CanonicalFarmer } from '../../shared/types/storage';
 import {
-  addBillingFarmer,
-  getBillingFarmers,
-  getBillingProducts,
-  recordBillingSale,
-  updateBillingFarmer,
-} from '../services/billingService';
+  getFarmersByRuralMart,
+  saveFarmer,
+  updateFarmer,
+  getProductsByRuralMart,
+  recordCustomerBill,
+  BillLineItem,
+} from '../../shared/dataServices';
+import { CanonicalProduct, CanonicalFarmer } from '../../shared/types/storage';
 
 // This panel is the SINGLE reusable "Farmer Purchase & Bill Entry" billing experience.
 // It is rendered on Page 2 (Daily Business) and inside the Page 1 (Overall Dashboard)
@@ -58,7 +58,9 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     const [localRefresh, setLocalRefresh] = useState<number>(0);
     const bumpLocal = () => setLocalRefresh((k) => k + 1);
 
-    const [catalogProducts, setCatalogProducts] = useState<CanonicalProduct[]>([]);
+    const catalogProducts = useMemo(() => {
+      return getProductsByRuralMart(ruralMartId);
+    }, [ruralMartId, refreshKey, localRefresh]);
 
     // --- FARMER LOOKUP & CUSTOMER STATE ---
     const [farmerTab, setFarmerTab] = useState<'existing' | 'new'>('existing');
@@ -72,24 +74,9 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     const [farmerUpdateMsg, setFarmerUpdateMsg] = useState<string>('');
 
     // All registered farmers for customer selection/search
-    const [allRegisteredFarmers, setAllRegisteredFarmers] = useState<CanonicalFarmer[]>([]);
-
-    useEffect(() => {
-      let active = true;
-      if (!ruralMartId) return;
-      void Promise.all([getBillingProducts(ruralMartId), getBillingFarmers(ruralMartId)])
-        .then(([products, farmers]) => {
-          if (!active) return;
-          setCatalogProducts(products);
-          setAllRegisteredFarmers(farmers);
-        })
-        .catch((error: unknown) => {
-          if (active) setBillError(error instanceof Error ? error.message : 'Unable to load billing data.');
-        });
-      return () => {
-        active = false;
-      };
-    }, [localRefresh, refreshKey, ruralMartId]);
+    const allRegisteredFarmers = useMemo(() => {
+      return getFarmersByRuralMart(ruralMartId);
+    }, [ruralMartId, refreshKey, localRefresh, matchedFarmer]);
 
     // Live search results (Google-like autocomplete) — filters by name, mobile, Farmer ID, farmerCode
     const liveSearchResults = useMemo(() => {
@@ -109,12 +96,6 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
         );
       });
     }, [farmerSearchInput, allRegisteredFarmers]);
-
-    const searchedMobile = farmerSearchInput.replace(/\D/g, '').slice(-10);
-    const isCompleteMobileSearch = searchedMobile.length === 10;
-    const exactMobileMatch = isCompleteMobileSearch
-      ? allRegisteredFarmers.find((farmer) => farmer.phone.replace(/\D/g, '').slice(-10) === searchedMobile) ?? null
-      : null;
 
     // Notify parent whenever the attached customer changes
     useEffect(() => {
@@ -147,7 +128,9 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
 
     // --- FARMER PURCHASE / BILL FORM DRAFT STATE ---
     const [selectedCategory, setSelectedCategory] = useState<string>('All Categories');
+    const [customCategoryText, setCustomCategoryText] = useState<string>('');
     const [selectedProductId, setSelectedProductId] = useState<string>('');
+    const [customProductText, setCustomProductText] = useState<string>('');
     const [inputQuantity, setInputQuantity] = useState<string>('');
     const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'UPI / Online' | 'Credit / Due'>('Cash');
 
@@ -251,7 +234,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     };
 
     // Generate Customer Bill & Complete Transaction
-    const handleGenerateBill = async (e: React.FormEvent) => {
+    const handleGenerateBill = (e: React.FormEvent) => {
       e.preventDefault();
       setBillError('');
       setBillSuccessMsg('');
@@ -266,20 +249,20 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
         return;
       }
 
-      let result: { billNumber: string; totalAmount: number };
-      try {
-        result = await recordBillingSale({
-          ruralMartId,
-          farmerId: matchedFarmer.id,
-          items: billDraftItems.map((item) => ({ productId: item.productId, quantity: item.quantity, unitPrice: item.unitPrice })),
-        });
-      } catch (error) {
-        setBillError(error instanceof Error ? error.message : 'Failed to complete bill transaction.');
+      const result = recordCustomerBill(ruralMartId, {
+        farmerId: matchedFarmer.id,
+        farmerName: matchedFarmer.name,
+        paymentMethod,
+        lineItems: billDraftItems,
+      });
+
+      if (!result.success) {
+        setBillError(result.errorMessage || 'Failed to complete bill transaction.');
         return;
       }
 
       const billAmount = totalBillAmount;
-      const billNumber = result.billNumber;
+      const billNumber = result.billNumber || '';
       const customerName = matchedFarmer.name;
 
       // Success!
@@ -355,7 +338,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       setEditFarmerVillage(matchedFarmer.village);
     };
 
-    const handleSaveChangesFarmer = async (e: React.FormEvent) => {
+    const handleSaveChangesFarmer = (e: React.FormEvent) => {
       e.preventDefault();
       if (!matchedFarmer) return;
 
@@ -364,12 +347,11 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       const updatedCount = Number(editCattleCount) || 0;
 
       if (matchedFarmer.id) {
-        try {
-          await updateBillingFarmer(matchedFarmer.id, { name: updatedName, village: updatedVillage, cattleCount: updatedCount });
-        } catch (error) {
-          setFarmerUpdateMsg(error instanceof Error ? error.message : 'Unable to update the customer.');
-          return;
-        }
+        updateFarmer(matchedFarmer.id, {
+          name: updatedName,
+          village: updatedVillage,
+          animalHeadCount: updatedCount,
+        });
       }
 
       setMatchedFarmer((prev: any) => ({
@@ -389,7 +371,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     };
 
     // New Customer Registration
-    const handleSaveNewCustomer = async (e: React.FormEvent) => {
+    const handleSaveNewCustomer = (e: React.FormEvent) => {
       e.preventDefault();
       const errors: Record<string, string> = {};
 
@@ -415,18 +397,11 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       const otherLivestockCount = Number(numOtherLivestock) || 0;
       const totalAnimals = cattleCount + otherLivestockCount;
 
-      let savedFarmer;
-      try {
-        savedFarmer = await addBillingFarmer({ ruralMartId, name: newName.trim(), mobile: cleanMobile, village: newVillage.trim(), cattleCount: totalAnimals });
-      } catch (error) {
-        setNewCustomerErrors({ form: error instanceof Error ? error.message : 'Unable to register the customer.' });
-        return;
-      }
-      const newFarmerId = savedFarmer.id;
+      const newFarmerId = `FMR-${1040 + Math.floor(Math.random() * 8000)}`;
 
       const farmerRecord: CanonicalFarmer = {
         id: newFarmerId,
-        farmerCode: savedFarmer.farmer_code,
+        farmerCode: newFarmerId,
         ruralMartId,
         name: newName.trim(),
         phone: cleanMobile.startsWith('+91') ? cleanMobile : `+91 ${cleanMobile}`,
@@ -446,6 +421,8 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
         totalPurchasesVal: 0,
         joinedDate: currentFormattedDate,
       };
+
+      saveFarmer(farmerRecord);
 
       const createdFarmer = {
         ...farmerRecord,
@@ -706,18 +683,6 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                     />
                   </div>
 
-                  {isCompleteMobileSearch && (
-                    <div className={`p-2.5 rounded-xl border text-xs font-semibold ${
-                      exactMobileMatch
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-300'
-                        : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-300'
-                    }`}>
-                      {exactMobileMatch
-                        ? `Existing farmer found: ${exactMobileMatch.name}. Select the record below to attach it to this bill.`
-                        : 'This mobile number is not registered for your Rural Mart. Use “Register New Customer” to add the farmer.'}
-                    </div>
-                  )}
-
                   {/* Live Search Results */}
                   {farmerSearchInput.trim() && (
                     <div className="border border-[#DDE6E0] dark:border-[#1E3129] rounded-xl overflow-hidden max-h-64 overflow-y-auto divide-y divide-[#E9EFEB] dark:divide-[#1F3128]">
@@ -955,6 +920,9 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                 onChange={(e) => {
                   setSelectedCategory(e.target.value);
                   setSelectedProductId('');
+                  if (e.target.value !== 'Others') {
+                    setCustomCategoryText('');
+                  }
                 }}
                 className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
               >
@@ -968,6 +936,15 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                 <option value="Groceries">Groceries</option>
                 <option value="Others">Others</option>
               </select>
+              {selectedCategory === 'Others' && (
+                <input
+                  type="text"
+                  placeholder="Type custom category..."
+                  value={customCategoryText}
+                  onChange={(e) => setCustomCategoryText(e.target.value)}
+                  className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#174F3A] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
+                />
+              )}
             </div>
 
             {/* Product Selection */}
@@ -977,7 +954,12 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
               </label>
               <select
                 value={selectedProductId}
-                onChange={(e) => setSelectedProductId(e.target.value)}
+                onChange={(e) => {
+                  setSelectedProductId(e.target.value);
+                  if (e.target.value !== '__CREATE_CUSTOM__') {
+                    setCustomProductText('');
+                  }
+                }}
                 className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
               >
                 <option value="">Select a product from inventory catalog</option>
@@ -986,7 +968,17 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                     {p.name} — ₹{p.sellingPrice}/{p.unit || 'units'} ({p.stockQty} in stock)
                   </option>
                 ))}
+                <option value="__CREATE_CUSTOM__">+ Create / Others (Type Custom Product)</option>
               </select>
+              {selectedProductId === '__CREATE_CUSTOM__' && (
+                <input
+                  type="text"
+                  placeholder="Type product name / details..."
+                  value={customProductText}
+                  onChange={(e) => setCustomProductText(e.target.value)}
+                  className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#174F3A] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
+                />
+              )}
             </div>
 
           </div>

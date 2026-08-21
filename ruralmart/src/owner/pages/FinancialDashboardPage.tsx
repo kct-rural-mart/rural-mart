@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   TrendingUp,
   Trash2,
@@ -22,6 +22,9 @@ import {
 } from 'recharts';
 import { getChartTheme } from '../../shared/theme';
 import {
+  getFinancialEntries,
+  saveFinancialEntryRecord,
+  deleteFinancialEntryRecord,
   getSalesByRuralMart,
   getPurchasesByRuralMart,
   getExpensesByRuralMart,
@@ -29,7 +32,6 @@ import {
   getProductsByRuralMart,
   FinancialEntryRecord,
 } from '../../shared/dataServices';
-import { addOwnerExpense, deleteOwnerExpense, getOwnerExpenses } from '../services/financeService';
 
 interface FinancialDashboardPageProps {
   currentMartId?: string | null;
@@ -196,18 +198,13 @@ export const FinancialDashboardPage: React.FC<FinancialDashboardPageProps> = ({
   const [customEndDate, setCustomEndDate] = useState('');
 
   // Financial Entry State
-  const [entries, setEntries] = useState<FinancialEntryRecord[]>([]);
+  const [entries, setEntries] = useState<FinancialEntryRecord[]>(() =>
+    getFinancialEntries(ruralMartId)
+  );
 
-  const refreshData = async () => {
-    setEntries(await getOwnerExpenses(ruralMartId));
+  const refreshData = () => {
+    setEntries(getFinancialEntries(ruralMartId));
   };
-
-  useEffect(() => {
-    void refreshData().catch((error: unknown) => {
-      setToastMessage(error && typeof error === 'object' && 'message' in error
-        ? String((error as { message: unknown }).message) : 'Unable to load expenses.');
-    });
-  }, [ruralMartId]);
 
   // Toast State
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -236,7 +233,7 @@ export const FinancialDashboardPage: React.FC<FinancialDashboardPageProps> = ({
   // Fetch all raw collections
   const rawSales = useMemo(() => getSalesByRuralMart(ruralMartId), [ruralMartId]);
   const rawPurchases = useMemo(() => getPurchasesByRuralMart(ruralMartId), [ruralMartId]);
-  const rawExpenses = useMemo(() => [] as ReturnType<typeof getExpensesByRuralMart>, [ruralMartId]);
+  const rawExpenses = useMemo(() => getExpensesByRuralMart(ruralMartId), [ruralMartId]);
   const rawOpEntries = useMemo(() => getOperationalEntries(ruralMartId), [ruralMartId]);
   const products = useMemo(() => getProductsByRuralMart(ruralMartId), [ruralMartId]);
 
@@ -366,7 +363,7 @@ export const FinancialDashboardPage: React.FC<FinancialDashboardPageProps> = ({
   }, [filteredSales, filteredPurchases, filteredExpenses, filteredEntries]);
 
   // Save Financial Entry
-  const handleSaveFinancialEntry = async (e: React.FormEvent) => {
+  const handleSaveFinancialEntry = (e: React.FormEvent) => {
     e.preventDefault();
     const numericAmount = Number(amountInput);
     if (isNaN(numericAmount) || numericAmount <= 0) {
@@ -375,8 +372,8 @@ export const FinancialDashboardPage: React.FC<FinancialDashboardPageProps> = ({
     }
 
     const finalCategoryName =
-      categoryPreset === 'Custom Category...'
-        ? customCategory.trim() || 'Custom Expense'
+      categoryPreset === 'Custom Category...' || categoryPreset === 'Other Expense'
+        ? customCategory.trim() || categoryPreset
         : categoryPreset;
 
     const newEntry: FinancialEntryRecord = {
@@ -405,34 +402,17 @@ export const FinancialDashboardPage: React.FC<FinancialDashboardPageProps> = ({
     newEntry.grossProfit = snapshotGrossProfit;
     newEntry.netProfit = snapshotGrossProfit - snapshotOperatingExpenses;
 
-    try {
-      await addOwnerExpense({
-        ruralMartId,
-        category: finalCategoryName,
-        amount: numericAmount,
-        date: dateInput,
-        description: descriptionInput.trim(),
-      });
-      await refreshData();
-    } catch (error) {
-      showToast(error && typeof error === 'object' && 'message' in error
-        ? String((error as { message: unknown }).message) : 'Unable to save expense.');
-      return;
-    }
+    saveFinancialEntryRecord(newEntry);
+    refreshData();
     showToast(`Expense for "${finalCategoryName}" (₹${numericAmount.toLocaleString('en-IN')}) saved!`);
     handleClearForm();
   };
 
   // Delete Financial Entry
-  const handleDeleteEntry = async (id: string) => {
-    try {
-      await deleteOwnerExpense(id);
-      await refreshData();
-      showToast('Financial entry deleted successfully.');
-    } catch (error) {
-      showToast(error && typeof error === 'object' && 'message' in error
-        ? String((error as { message: unknown }).message) : 'Unable to delete expense.');
-    }
+  const handleDeleteEntry = (id: string) => {
+    deleteFinancialEntryRecord(ruralMartId, id);
+    refreshData();
+    showToast('Financial entry deleted successfully.');
   };
 
   // Custom Chart Tooltip
@@ -708,7 +688,7 @@ export const FinancialDashboardPage: React.FC<FinancialDashboardPageProps> = ({
             </div>
 
             {/* Field 2: Custom Category Input (if selected) or Amount */}
-            {categoryPreset === 'Custom Category...' ? (
+            {(categoryPreset === 'Custom Category...' || categoryPreset === 'Other Expense') ? (
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-[#17221D] dark:text-[#E6ECE8]">
                   Custom Category Name <span className="text-red-500">*</span>

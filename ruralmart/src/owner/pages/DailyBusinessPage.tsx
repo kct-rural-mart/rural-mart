@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Search,
   X,
@@ -23,20 +23,23 @@ import {
 } from 'lucide-react';
 import { getOwnerFarmers } from '../../ownerMockData';
 import {
+  getFarmersByRuralMart,
   deleteFarmer,
+  getOperationalEntries,
   updateOperationalEntry,
   deleteOperationalEntry,
+  getDailyBusinessCalculatedMetrics,
+  getSalesByRuralMart,
+  getProductsByRuralMart,
   BillLineItem,
 } from '../../shared/dataServices';
 import { CanonicalFarmer } from '../../shared/types/storage';
 import { BillingPanel, BillingPanelHandle } from '../components/BillingPanel';
-import { getDailyBusinessLiveData } from '../services/billingService';
 
 interface DailyBusinessPageProps {
   currentMartId?: string | null;
   theme: 'light' | 'dark';
   searchQuery: string;
-  dateRange: string;
 }
 
 interface OperationalEntry {
@@ -55,14 +58,12 @@ interface OperationalEntry {
   status: 'Saved' | 'Edited';
   billNumber?: string;
   lineItems?: BillLineItem[];
-  farmerId?: string;
 }
 
 export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   currentMartId,
   theme,
   searchQuery: externalSearchQuery,
-  dateRange,
 }) => {
   const isDark = theme === 'dark';
   const RURAL_MART_ID = currentMartId || '';
@@ -71,10 +72,61 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   const [refreshKey, setRefreshKey] = useState<number>(0);
 
   // --- AUTOMATIC DERIVED METRICS FROM CANONICAL RECORDS ---
-  const [metrics, setMetrics] = useState({
-    procurementQty: 0, procurementValue: 0, openingStock: 0, closingStock: 0,
-    salesQty: 0, totalSales: 0, customerBills: 0, avgBillValue: 0,
-  });
+  const metrics = useMemo(() => {
+    return getDailyBusinessCalculatedMetrics(RURAL_MART_ID);
+  }, [refreshKey]);
+
+  // --- PRODUCT-WISE METRICS: dropdown selection + per-product calculation ---
+  const metricsProducts = useMemo(() => {
+    return getProductsByRuralMart(RURAL_MART_ID);
+  }, [refreshKey]);
+
+  const [selectedMetricsProductId, setSelectedMetricsProductId] = useState<string>('ALL');
+
+  const productMetrics = useMemo(() => {
+    if (selectedMetricsProductId === 'ALL') return null;
+    const p = metricsProducts.find((prod) => prod.id === selectedMetricsProductId);
+    if (!p) return null;
+
+    const procurementQty = p.procurementQty ?? (p as any).procurementQuantity ?? 0;
+    const procurementValue =
+      (p as any).procurementValue ?? procurementQty * (p.costPrice ?? (p as any).procurementPricePerUnit ?? 0);
+    const openingStock =
+      (p as any).openingStockQty ??
+      (p as any).openingStockQuantity ??
+      ((p.stockQty ?? 0) - procurementQty + (p.salesQty ?? (p as any).salesQuantity ?? 0));
+    const salesQtyFromProduct = p.salesQty ?? (p as any).salesQuantity ?? 0;
+    const calcClosing = openingStock + procurementQty - salesQtyFromProduct;
+    const closingStock = p.stockQty ?? calcClosing;
+
+    // Sum this product's line items across completed bills for sales value / bill count
+    const completedSales = getSalesByRuralMart(RURAL_MART_ID).filter((s) => s.status === 'Completed');
+    let totalSalesValue = 0;
+    let customerBills = 0;
+    completedSales.forEach((sale) => {
+      const matchingLines = (sale.lineItems || []).filter(
+        (item) => (item as any).productId === p.id || item.productName === p.name
+      );
+      if (matchingLines.length > 0) {
+        customerBills += 1;
+        totalSalesValue += matchingLines.reduce((sum, item) => sum + (item.lineTotal || 0), 0);
+      }
+    });
+    const avgBillValue = customerBills > 0 ? Math.round(totalSalesValue / customerBills) : 0;
+
+    return {
+      openingStock,
+      procurementQty,
+      salesQty: salesQtyFromProduct,
+      closingStock,
+      procurementValue,
+      totalSales: totalSalesValue,
+      customerBills,
+      avgBillValue,
+    };
+  }, [selectedMetricsProductId, metricsProducts, RURAL_MART_ID, refreshKey]);
+
+  const displayMetrics = selectedMetricsProductId === 'ALL' ? metrics : (productMetrics || metrics);
 
   // --- REUSABLE BILLING PANEL: ref for external actions (Registered Customers panel) ---
   const billingPanelRef = useRef<BillingPanelHandle>(null);
@@ -84,7 +136,9 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
 
   // --- ENTRY HISTORY STATE ---
   const [isHistoryOpen, setIsHistoryOpen] = useState<boolean>(false);
-  const [savedEntries, setSavedEntries] = useState<OperationalEntry[]>([]);
+  const savedEntries: OperationalEntry[] = useMemo(() => {
+    return getOperationalEntries(RURAL_MART_ID);
+  }, [refreshKey]);
 
   const [historySearch, setHistorySearch] = useState<string>('');
   const [historyDate, setHistoryDate] = useState<string>('');
@@ -100,37 +154,20 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   const [viewFarmer, setViewFarmer] = useState<CanonicalFarmer | null>(null);
 
   // All registered farmers for the Registered Customers directory panel
-  const [allRegisteredFarmers, setAllRegisteredFarmers] = useState<CanonicalFarmer[]>([]);
-
-  useEffect(() => {
-    let active = true;
-    if (!RURAL_MART_ID) return;
-    getDailyBusinessLiveData(RURAL_MART_ID, dateRange)
-      .then((result) => {
-        if (!active) return;
-        setMetrics(result.metrics);
-        setSavedEntries(result.entries);
-        setAllRegisteredFarmers(result.farmers);
-      })
-      .catch((error) => console.error('Failed to load live daily business data:', error));
-    return () => { active = false; };
-  }, [RURAL_MART_ID, dateRange, refreshKey]);
+  const allRegisteredFarmers = useMemo(() => {
+    return getFarmersByRuralMart(RURAL_MART_ID);
+  }, [refreshKey]);
 
   // Purchase history & summary for the customer currently open in the View modal
   const viewFarmerSales = useMemo(() => {
     if (!viewFarmer) return [];
-    return savedEntries
-      .filter((entry) => entry.farmerId === viewFarmer.id)
-      .map((entry) => ({
-        id: entry.id,
-        date: entry.date,
-        billNumber: entry.billNumber ?? entry.id,
-        amount: entry.salesValue,
-        lineItems: entry.lineItems,
-        productName: entry.lineItems?.[0]?.productName,
-        salesQty: entry.salesQty,
-      }));
-  }, [viewFarmer, savedEntries]);
+    const allSales = getSalesByRuralMart(viewFarmer.ruralMartId || RURAL_MART_ID);
+    return allSales.filter(
+      (s) =>
+        s.farmerId === viewFarmer.id ||
+        (s.customerName && s.customerName.toLowerCase() === viewFarmer.name.toLowerCase())
+    );
+  }, [viewFarmer, refreshKey]);
 
   const viewCustomerSummary = useMemo(() => {
     if (!viewFarmer) {
@@ -353,7 +390,7 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
 
           {/* AUTOMATIC OPERATIONAL METRICS SUMMARY PANEL */}
           <div className="card-enterprise p-4 sm:p-5 space-y-3">
-            <div className="border-b border-[#E9EFEB] dark:border-[#16241E] pb-2.5 flex items-center justify-between">
+            <div className="border-b border-[#E9EFEB] dark:border-[#16241E] pb-2.5 flex items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-bold text-[#17221D] dark:text-[#E6ECE8] uppercase tracking-wider">
                   Automated Operational Metrics Summary
@@ -362,47 +399,60 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
                   Calculated live from stored inventory procurement and farmer sales transactions.
                 </p>
               </div>
+
+              <select
+                value={selectedMetricsProductId}
+                onChange={(e) => setSelectedMetricsProductId(e.target.value)}
+                className="h-8 px-2.5 text-[11px] font-semibold rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8] shrink-0 cursor-pointer"
+              >
+                <option value="ALL">Overall Mart / All Products</option>
+                {metricsProducts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Opening Stock</span>
-                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">{metrics.openingStock} units</span>
+                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">{displayMetrics.openingStock} units</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Procurement Qty</span>
-                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">{metrics.procurementQty} units</span>
+                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">{displayMetrics.procurementQty} units</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Sales Quantity</span>
-                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{metrics.salesQty} units</span>
+                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{displayMetrics.salesQty} units</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Closing Stock</span>
-                <span className="text-sm font-bold text-[#174F3A] dark:text-[#A3E6C5]">{metrics.closingStock} units</span>
+                <span className="text-sm font-bold text-[#174F3A] dark:text-[#A3E6C5]">{displayMetrics.closingStock} units</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Procurement Value</span>
-                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">₹{metrics.procurementValue.toLocaleString('en-IN')}</span>
+                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">₹{displayMetrics.procurementValue.toLocaleString('en-IN')}</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Total Sales Value</span>
-                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">₹{metrics.totalSales.toLocaleString('en-IN')}</span>
+                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">₹{displayMetrics.totalSales.toLocaleString('en-IN')}</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Customer Bills</span>
-                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">{metrics.customerBills} bills</span>
+                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">{displayMetrics.customerBills} bills</span>
               </div>
 
               <div className="p-2.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] border border-[#DDE6E0] dark:border-[#1E3129] space-y-0.5">
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] font-semibold block uppercase">Average Bill Value</span>
-                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">₹{metrics.avgBillValue.toLocaleString('en-IN')}</span>
+                <span className="text-sm font-bold text-[#17221D] dark:text-[#E6ECE8]">₹{displayMetrics.avgBillValue.toLocaleString('en-IN')}</span>
               </div>
             </div>
           </div>
