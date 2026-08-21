@@ -54,12 +54,44 @@ export const FarmersOutreachPage: React.FC<FarmersOutreachPageProps> = ({
     });
   }, [allFarmers, selectedDistrict, selectedMart]);
 
+  // Network-wide farmer totals for the KPI cards, deduped by phone number so a
+  // person registered at two marts (within whatever district/mart filter is
+  // currently applied) is counted once, not twice. Computed from the same
+  // filtered set the Farmer Database table below uses, so the filter behaves
+  // consistently everywhere on this page.
+  const networkFarmerTotals = useMemo(() => {
+    const repeatPhones = new Set<string>();
+    const newCandidatePhones = new Set<string>();
+    const allPhones = new Set<string>();
+
+    for (const farmer of filteredFarmerRecords) {
+      const phone = (farmer.phone || '').replace(/\D/g, '').slice(-10);
+      if (!phone) continue;
+      allPhones.add(phone);
+      if (farmer.purchaseCount >= 2) repeatPhones.add(phone);
+      else if (farmer.purchaseCount === 1) newCandidatePhones.add(phone);
+    }
+    // A phone only counts as "new" if none of its rows already qualified as repeat.
+    const newPhones = [...newCandidatePhones].filter((phone) => !repeatPhones.has(phone));
+
+    return {
+      totalRegistered: allPhones.size,
+      totalNew: newPhones.length,
+      totalRepeat: repeatPhones.size,
+    };
+  }, [filteredFarmerRecords]);
+
   return (
     <div className="space-y-5">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
       {/* SECTION 1 — 6 KPI Cards */}
       <section>
-        <FarmersKpiCards outreachMarts={filteredOutreachMarts} />
+        <FarmersKpiCards
+          outreachMarts={filteredOutreachMarts}
+          totalRegisteredFarmers={networkFarmerTotals.totalRegistered}
+          totalNewFarmers={networkFarmerTotals.totalNew}
+          totalRepeatFarmers={networkFarmerTotals.totalRepeat}
+        />
       </section>
 
       {/* SECTION 2 — Full Width Farmer Database (200 Records) */}

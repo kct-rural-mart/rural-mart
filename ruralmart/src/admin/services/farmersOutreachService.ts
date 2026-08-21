@@ -2,6 +2,13 @@ import { supabase } from '../../lib/supabaseClient';
 import type { FarmerGrowthDataPoint, FarmerOutreachMartRecord, FarmerRecord, OutreachPerformanceDataPoint } from '../../shared/types';
 
 export interface LiveFarmersOutreachData { farmers: FarmerRecord[]; marts: FarmerOutreachMartRecord[]; growth: FarmerGrowthDataPoint[]; outreach: OutreachPerformanceDataPoint[] }
+
+// Same real person can be registered as separate farmer rows at different marts
+// (farmers is only unique per rural_mart_id + mobile, by design). Normalizing to
+// the last 10 digits lets network-wide aggregates recognize them as one person.
+function normalizePhone(mobile: string | null | undefined): string {
+  return (mobile || '').replace(/\D/g, '').slice(-10);
+}
 export interface LiveFarmerSale { id: string; date: string; billNumber: string; amount: number; lineItems: { productName: string; unit: string; quantity: number; unitPrice: number; lineTotal: number }[]; productName?: string; salesQty?: number }
 
 export async function getLiveFarmerSales(farmerId: string): Promise<LiveFarmerSale[]> {
@@ -26,7 +33,7 @@ export async function getLiveFarmersOutreach(): Promise<LiveFarmersOutreachData>
   const farmerRecords = farmers.map((farmer): FarmerRecord => {
     const purchases = salesByFarmer.get(farmer.id) ?? []; const mart = martById.get(farmer.rural_mart_id);
     const latest = [...purchases].sort((a, b) => b.sale_date.localeCompare(a.sale_date))[0];
-    return { id: farmer.id, name: farmer.name, village: farmer.village || 'Not provided', district: mart?.district || 'Unknown', ruralMart: mart?.mart_name || 'Unknown Rural Mart', category: 'Registered Farmer', animalHeadCount: Number(farmer.cattle_count) || 0, lastVisit: latest?.sale_date || 'No purchase', status: purchases.length >= 2 ? 'Repeat' : 'New', phone: farmer.mobile, totalPurchasesVal: purchases.reduce((sum, sale) => sum + Number(sale.total_amount), 0), joinedDate: farmer.created_at };
+    return { id: farmer.id, name: farmer.name, village: farmer.village || 'Not provided', district: mart?.district || 'Unknown', ruralMart: mart?.mart_name || 'Unknown Rural Mart', category: 'Registered Farmer', animalHeadCount: Number(farmer.cattle_count) || 0, lastVisit: latest?.sale_date || 'No purchase', status: purchases.length >= 2 ? 'Repeat' : 'New', phone: farmer.mobile, purchaseCount: purchases.length, totalPurchasesVal: purchases.reduce((sum, sale) => sum + Number(sale.total_amount), 0), joinedDate: farmer.created_at };
   });
   const outreachMarts = marts.map((mart): FarmerOutreachMartRecord => {
     const martFarmers = farmers.filter((farmer) => farmer.rural_mart_id === mart.id); const martSales = sales.filter((sale) => sale.rural_mart_id === mart.id); const martPrograms = programs.filter((program) => program.rural_mart_id === mart.id);
@@ -36,7 +43,43 @@ export async function getLiveFarmersOutreach(): Promise<LiveFarmersOutreachData>
     return { id: mart.id, name: mart.mart_name, district: mart.district, status: martSales.length ? 'Active' : martPrograms.length ? 'Delayed' : 'Inactive', totalRegisteredFarmers: martFarmers.length, newFarmers: newIds.size, repeatFarmers: repeatIds.size, farmersReached: reached, outreachProgramsConducted: martPrograms.length, villagesCovered: new Set(martPrograms.map((program) => program.village)).size, animalPopulationCovered: 0, retentionRate: newIds.size + repeatIds.size ? Math.round((repeatIds.size / (newIds.size + repeatIds.size)) * 1000) / 10 : 0, sparklineData: [] };
   });
   const months = Array.from({ length: 8 }, (_, index) => { const date = new Date(); date.setDate(1); date.setMonth(date.getMonth() - (7 - index)); return { key: date.toISOString().slice(0, 7), period: date.toLocaleDateString('en-IN', { month: 'short' }) }; });
-  const growth = months.map((month): FarmerGrowthDataPoint => { const joined = farmers.filter((farmer) => farmer.created_at.slice(0, 7) === month.key).length; const monthSales = sales.filter((sale) => sale.sale_date.startsWith(month.key)); const ids = new Set(monthSales.map((sale) => sale.farmer_id)); const repeat = [...ids].filter((id) => (salesByFarmer.get(id)?.filter((sale) => sale.sale_date < `${month.key}-01`).length ?? 0) > 0).length; return { period: month.period, registeredFarmers: farmers.filter((farmer) => farmer.created_at.slice(0, 7) <= month.key).length, newFarmers: joined, repeatFarmers: repeat }; });
+
+  // Network-wide growth trend: a farmer registered at two different marts is the
+  // same PERSON, not two people — dedupe by phone number so this trend (and the
+  // "Total/New/Repeat Farmers" KPI cards, computed the same way from this data
+  // in FarmersOutreachPage.tsx) don't double-count them. Per-mart numbers above
+  // (outreachMarts) are intentionally left as-is — each mart's own count of its
+  // own farmer records is correct exactly as it stands.
+  const phoneByFarmerId = new Map(farmers.map((farmer) => [farmer.id, normalizePhone(farmer.mobile)]));
+  const firstJoinByPhone = new Map<string, string>();
+  for (const farmer of farmers) {
+    const phone = phoneByFarmerId.get(farmer.id);
+    if (!phone) continue;
+    const existing = firstJoinByPhone.get(phone);
+    if (!existing || farmer.created_at < existing) firstJoinByPhone.set(phone, farmer.created_at);
+  }
+
+  const growth = months.map((month): FarmerGrowthDataPoint => {
+    // Registered / New: counted once per person, at their first-ever registration
+    // anywhere in the network (whichever mart that happened to be at).
+    let registeredFarmers = 0;
+    let newFarmers = 0;
+    for (const firstJoinedAt of firstJoinByPhone.values()) {
+      const joinMonth = firstJoinedAt.slice(0, 7);
+      if (joinMonth <= month.key) registeredFarmers += 1;
+      if (joinMonth === month.key) newFarmers += 1;
+    }
+
+    // Repeat still means "2+ purchases at the same mart" — unchanged rule, only
+    // the counting of people (not mart-relationships) is deduped.
+    const monthSales = sales.filter((sale) => sale.sale_date.startsWith(month.key));
+    const qualifyingFarmerIds = [...new Set(monthSales.map((sale) => sale.farmer_id))].filter(
+      (id) => (salesByFarmer.get(id)?.filter((sale) => sale.sale_date < `${month.key}-01`).length ?? 0) > 0
+    );
+    const repeatPhones = new Set(qualifyingFarmerIds.map((id) => phoneByFarmerId.get(id)).filter(Boolean));
+
+    return { period: month.period, registeredFarmers, newFarmers, repeatFarmers: repeatPhones.size };
+  });
   const outreach = months.map((month): OutreachPerformanceDataPoint => { const rows = programs.filter((program) => program.program_date.startsWith(month.key)); return { period: month.period, programsConducted: rows.length, farmersReached: rows.reduce((sum, row) => sum + (Number(row.reported_attendance_count) || 0), 0), villagesCovered: new Set(rows.map((row) => row.village)).size }; });
   return { farmers: farmerRecords, marts: outreachMarts, growth, outreach };
 }

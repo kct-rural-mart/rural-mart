@@ -6,10 +6,10 @@ import {
   Headphones,
   CheckCircle2,
   X,
+  AlertCircle,
   ExternalLink,
   Edit2,
   Clock,
-  AlertCircle,
   KeyRound,
   Store,
   UserCircle2,
@@ -17,13 +17,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../auth/context/AuthContext';
 import { ChangePasswordPage } from '../../auth/pages/ChangePasswordPage';
-import { getOwnerRuralMart, OwnerRuralMart, updateOwnerRuralMart } from '../services/martService';
 import {
-  getRuralMartById,
-  getRuralMarts,
-  getOwnerById,
-  getOwners,
-} from '../../shared/dataServices';
+  getOwnerRuralMart,
+  updateOwnerRuralMart,
+  uploadOwnerMartPhoto,
+  uploadOwnerEntrepreneurPhoto,
+  OwnerRuralMart,
+  OwnerRuralMartUpdate,
+} from '../services/martService';
 
 interface OwnerSettingsPageProps {
   currentMartId?: string | null;
@@ -40,6 +41,39 @@ const TAMIL_NADU_DISTRICTS = [
   'Tiruvannamalai', 'Tiruvarur', 'Vellore', 'Viluppuram', 'Virudhunagar',
 ];
 
+const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const MIN_AGE = 18;
+const MAX_AGE = 100;
+
+function calculateAge(dobIso: string): number | null {
+  if (!dobIso) return null;
+  const dob = new Date(`${dobIso}T00:00:00`);
+  if (Number.isNaN(dob.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const hasHadBirthdayThisYear =
+    today.getMonth() > dob.getMonth() ||
+    (today.getMonth() === dob.getMonth() && today.getDate() >= dob.getDate());
+  if (!hasHadBirthdayThisYear) age -= 1;
+  return age;
+}
+
+function formatAadhaarDisplay(digits: string): string {
+  return digits.match(/.{1,4}/g)?.join(' ') ?? '';
+}
+
+function readableError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const value = error as { message?: string; details?: string; hint?: string; code?: string };
+    const detail = [value.message, value.details, value.hint, value.code ? `Code: ${value.code}` : '']
+      .filter(Boolean)
+      .join(' — ');
+    if (detail) return detail;
+  }
+  return 'Something went wrong. Please try again.';
+}
+
 // Shared input classes so the Edit Profile form visually matches registration
 const fieldInputClass =
   'w-full h-9 px-3 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]';
@@ -52,57 +86,45 @@ const fieldFileWrapClass =
   'inline-flex items-center gap-2 h-9 px-3 text-xs font-semibold rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#174F3A] dark:text-[#A3E6C5] cursor-pointer';
 
 export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
-  currentMartId, theme }) => {
+  currentMartId }) => {
   const { user } = useAuth();
   const [liveMart, setLiveMart] = useState<OwnerRuralMart | null>(null);
+  const [isLoadingMart, setIsLoadingMart] = useState(true);
   const [profileError, setProfileError] = useState('');
-  // Load canonical Rural Mart and Owner profile from shared data layer
-  const initialMart = useMemo(() => {
-    return getRuralMartById(currentMartId || '') || getRuralMarts()[0] || null;
-  }, []);
 
-  const initialOwner = useMemo(() => {
-    return initialMart ? (getOwnerById(initialMart.ownerId) || getOwners()[0] || null) : (getOwners()[0] || null);
-  }, [initialMart]);
-
-  // Owner Profile state initialized from shared data layer
-  const [ownerId] = useState(initialOwner?.ownerId || '—');
-  const [ownerName, setOwnerName] = useState(initialOwner?.ownerName || '—');
-  const [companyName, setCompanyName] = useState(initialMart?.ruralMartName || '—');
-  const [registeredEmail] = useState(initialOwner?.email || '—');
-  const [phone, setPhone] = useState(initialOwner?.phone || '—');
-  const [gstNumber] = useState(initialMart?.gstNumber || '—');
-  const [location] = useState(initialMart ? `${initialMart.district}, Tamil Nadu` : '—');
+  // Header display values — all real, sourced from liveMart once it loads.
+  const ownerName = liveMart?.entrepreneur_name || '—';
+  const companyName = liveMart?.mart_name || '—';
+  const phone = liveMart?.mobile_number || '—';
+  const displayedOwnerId = liveMart?.reference_code || liveMart?.id || '—';
+  const displayedEmail = liveMart?.email || user?.email || '—';
+  const displayedGst = liveMart?.gst_number || 'Not provided';
+  const displayedLocation = liveMart
+    ? [liveMart.village, liveMart.block, liveMart.district].filter(Boolean).join(', ')
+    : '—';
 
   useEffect(() => {
     let active = true;
-    if (!currentMartId) return;
+    if (!currentMartId) {
+      setIsLoadingMart(false);
+      return;
+    }
     setProfileError('');
+    setIsLoadingMart(true);
     void getOwnerRuralMart(currentMartId)
       .then((mart) => {
         if (!active) return;
         setLiveMart(mart);
-        setOwnerName(mart.entrepreneur_name);
-        setCompanyName(mart.mart_name);
-        setPhone(mart.mobile_number || '—');
       })
       .catch((error: unknown) => {
         if (!active) return;
-        setProfileError(
-          error && typeof error === 'object' && 'message' in error
-            ? String((error as { message: unknown }).message)
-            : 'Unable to load owner registration details.',
-        );
+        setProfileError(readableError(error));
+      })
+      .finally(() => {
+        if (active) setIsLoadingMart(false);
       });
     return () => { active = false; };
   }, [currentMartId]);
-
-  const displayedOwnerId = liveMart?.reference_code || liveMart?.id || ownerId;
-  const displayedEmail = liveMart?.email || user?.email || registeredEmail;
-  const displayedGst = liveMart?.gst_number || gstNumber || 'Not provided';
-  const displayedLocation = liveMart
-    ? [liveMart.village, liveMart.block, liveMart.district].filter(Boolean).join(', ')
-    : location;
 
   // Modals state
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
@@ -117,37 +139,40 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
 
   // Section 1: Rural Mart / Shop Details
   const [editMartName, setEditMartName] = useState('');
-  const [editMartMobile, setEditMartMobile] = useState('');
   const [editDistrict, setEditDistrict] = useState('');
   const [editBlock, setEditBlock] = useState('');
   const [editVillage, setEditVillage] = useState('');
-  const [editOpeningDate, setEditOpeningDate] = useState(''); // TODO: map to mart.opening_date
-  const [editPhysicalAddress, setEditPhysicalAddress] = useState(''); // TODO: map to mart.physical_address
+  const [editOpeningDate, setEditOpeningDate] = useState('');
+  const [editPhysicalAddress, setEditPhysicalAddress] = useState('');
   const [editGstNumber, setEditGstNumber] = useState('');
-  const [editMartPhoto, setEditMartPhoto] = useState<File | null>(null); // TODO: wire to storage upload
+  const [editMartPhoto, setEditMartPhoto] = useState<File | null>(null);
+  const [currentMartPhotoUrl, setCurrentMartPhotoUrl] = useState('');
 
   // Section 2: Entrepreneur / Farmer Personal Details
-  const [editAadhaarName, setEditAadhaarName] = useState(''); // TODO: map to mart.entrepreneur_name (name as per Aadhaar)
+  const [editAadhaarName, setEditAadhaarName] = useState('');
   const [editPrimaryMobile, setEditPrimaryMobile] = useState('');
-  const [editSecondaryMobile, setEditSecondaryMobile] = useState(''); // TODO: map to mart.secondary_mobile
-  const [editEmail, setEditEmail] = useState(''); // read-only — Registered Email ID
-  const [editDob, setEditDob] = useState(''); // TODO: map to mart.date_of_birth
-  const [editAge, setEditAge] = useState(''); // derived from DOB, read-only
-  const [editGender, setEditGender] = useState(''); // TODO: map to mart.gender
-  const [editQualification, setEditQualification] = useState(''); // TODO: map to mart.qualification
-  const [editAddressPermanent, setEditAddressPermanent] = useState(''); // TODO: map to mart.address_permanent
-  const [editAddressTemporary, setEditAddressTemporary] = useState(''); // TODO: map to mart.address_temporary
-  const [editAadhaarNumber, setEditAadhaarNumber] = useState(''); // TODO: map to mart.aadhaar_number
-  const [editPanNumber, setEditPanNumber] = useState(''); // TODO: map to mart.pan_number
-  const [editSelfie, setEditSelfie] = useState<File | null>(null); // TODO: wire to storage upload
+  const [editSecondaryMobile, setEditSecondaryMobile] = useState('');
+  const [editEmail, setEditEmail] = useState(''); // read-only — see note near the field
+  const [editDob, setEditDob] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editQualification, setEditQualification] = useState('');
+  const [editAddressPermanent, setEditAddressPermanent] = useState('');
+  const [editAddressTemporary, setEditAddressTemporary] = useState('');
+  const [editAadhaarNumber, setEditAadhaarNumber] = useState('');
+  const [editPanNumber, setEditPanNumber] = useState('');
+  const [editSelfie, setEditSelfie] = useState<File | null>(null);
+  const [currentEntrepreneurPhotoUrl, setCurrentEntrepreneurPhotoUrl] = useState('');
 
   // Bank Details (part of Entrepreneur Details section in registration)
-  const [editBankAccountNumber, setEditBankAccountNumber] = useState(''); // TODO: map to mart.bank_account_number
-  const [editIfscCode, setEditIfscCode] = useState(''); // TODO: map to mart.ifsc_code
-  const [editBankName, setEditBankName] = useState(''); // TODO: map to mart.bank_name
-  const [editBranch, setEditBranch] = useState(''); // TODO: map to mart.branch
+  const [editBankAccountNumber, setEditBankAccountNumber] = useState('');
+  const [editIfscCode, setEditIfscCode] = useState('');
+  const [editBankName, setEditBankName] = useState('');
+  const [editBranch, setEditBranch] = useState('');
 
   const [editFormError, setEditFormError] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  const editAge = useMemo(() => calculateAge(editDob), [editDob]);
 
   // Contact Support Form State
   const [supportSubject, setSupportSubject] = useState('');
@@ -164,60 +189,85 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
     }, 4000);
   };
 
-  // Auto-calc age from DOB, same convenience as the registration form
-  useEffect(() => {
-    if (!editDob) {
-      setEditAge('');
-      return;
-    }
-    const dob = new Date(editDob);
-    if (Number.isNaN(dob.getTime())) {
-      setEditAge('');
-      return;
-    }
-    const today = new Date();
-    let age = today.getFullYear() - dob.getFullYear();
-    const m = today.getMonth() - dob.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
-      age -= 1;
-    }
-    setEditAge(String(age));
-  }, [editDob]);
+  const handleAadhaarChange = (val: string) => {
+    setEditAadhaarNumber(val.replace(/\D/g, '').slice(0, 12));
+  };
 
-  // Handle Edit Profile Open — populate every field from the current mart/owner record
+  const handlePanChange = (val: string) => {
+    setEditPanNumber(val.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10));
+  };
+
+  const handleMobileChange = (setter: (val: string) => void) => (val: string) => {
+    setter(val.replace(/\D/g, '').slice(0, 10));
+  };
+
+  const validatePhotoFile = (file: File): string | null => {
+    if (!file.type.startsWith('image/')) return 'Please select an image file.';
+    if (file.size > 5 * 1024 * 1024) return 'The image must be 5 MB or smaller.';
+    return null;
+  };
+
+  const handleMartPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const error = validatePhotoFile(file);
+    if (error) {
+      setEditFormError(error);
+      e.target.value = '';
+      return;
+    }
+    setEditFormError('');
+    setEditMartPhoto(file);
+  };
+
+  const handleSelfieChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const error = validatePhotoFile(file);
+    if (error) {
+      setEditFormError(error);
+      e.target.value = '';
+      return;
+    }
+    setEditFormError('');
+    setEditSelfie(file);
+  };
+
+  // Handle Edit Profile Open — populate every field from the current mart record
   const handleOpenEditProfile = () => {
     setEditFormError('');
 
     // Section 1
-    setEditMartName(companyName || '');
-    setEditMartMobile(liveMart?.mobile_number || '');
-    setEditDistrict(liveMart?.district || initialMart?.district || '');
+    setEditMartName(liveMart?.mart_name || '');
+    setEditDistrict(liveMart?.district || '');
     setEditBlock(liveMart?.block || '');
     setEditVillage(liveMart?.village || '');
-    setEditOpeningDate((liveMart as any)?.opening_date || '');
-    setEditPhysicalAddress((liveMart as any)?.physical_address || '');
-    setEditGstNumber(displayedGst === 'Not provided' ? '' : displayedGst);
+    setEditOpeningDate(liveMart?.opening_date || '');
+    setEditPhysicalAddress(liveMart?.physical_address || '');
+    setEditGstNumber(liveMart?.gst_number || '');
     setEditMartPhoto(null);
+    setCurrentMartPhotoUrl(liveMart?.mart_photo_url || '');
 
     // Section 2
-    setEditAadhaarName(ownerName || '');
-    setEditPrimaryMobile(phone || '');
-    setEditSecondaryMobile((liveMart as any)?.secondary_mobile || '');
-    setEditEmail(String(displayedEmail || ''));
-    setEditDob((liveMart as any)?.date_of_birth || '');
-    setEditGender((liveMart as any)?.gender || '');
-    setEditQualification((liveMart as any)?.qualification || '');
-    setEditAddressPermanent((liveMart as any)?.address_permanent || '');
-    setEditAddressTemporary((liveMart as any)?.address_temporary || '');
-    setEditAadhaarNumber((liveMart as any)?.aadhaar_number || '');
-    setEditPanNumber((liveMart as any)?.pan_number || '');
+    setEditAadhaarName(liveMart?.entrepreneur_name || '');
+    setEditPrimaryMobile(liveMart?.mobile_number || '');
+    setEditSecondaryMobile(liveMart?.secondary_mobile || '');
+    setEditEmail(liveMart?.email || user?.email || '');
+    setEditDob(liveMart?.date_of_birth || '');
+    setEditGender(liveMart?.gender || '');
+    setEditQualification(liveMart?.qualification || '');
+    setEditAddressPermanent(liveMart?.address_permanent || '');
+    setEditAddressTemporary(liveMart?.address_temporary || '');
+    setEditAadhaarNumber(liveMart?.aadhaar_number || '');
+    setEditPanNumber(liveMart?.pan_number || '');
     setEditSelfie(null);
+    setCurrentEntrepreneurPhotoUrl(liveMart?.entrepreneur_photo_url || '');
 
     // Bank details
-    setEditBankAccountNumber((liveMart as any)?.bank_account_number || '');
-    setEditIfscCode((liveMart as any)?.ifsc_code || '');
-    setEditBankName((liveMart as any)?.bank_name || '');
-    setEditBranch((liveMart as any)?.branch || '');
+    setEditBankAccountNumber(liveMart?.bank_account_number || '');
+    setEditIfscCode(liveMart?.ifsc_code || '');
+    setEditBankName(liveMart?.bank_name || '');
+    setEditBranch(liveMart?.branch || '');
 
     setIsEditProfileOpen(true);
   };
@@ -227,9 +277,9 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
     e.preventDefault();
     if (!currentMartId) return;
 
-    // Basic required-field guard, mirrors the * fields on the registration form
+    // Same required-field rules as registration.
     if (
-      !editMartName.trim() || !editMartMobile.trim() || !editDistrict.trim() ||
+      !editMartName.trim() || !editDistrict.trim() ||
       !editBlock.trim() || !editVillage.trim() || !editOpeningDate.trim() ||
       !editPhysicalAddress.trim() || !editAadhaarName.trim() || !editPrimaryMobile.trim() ||
       !editDob.trim() || !editGender.trim() || !editQualification.trim() ||
@@ -239,33 +289,78 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
       setEditFormError('Please fill in all required fields marked with *.');
       return;
     }
+    if (editPrimaryMobile.length !== 10) {
+      setEditFormError('Primary mobile number must be exactly 10 digits.');
+      return;
+    }
+    if (new Date(`${editDob}T00:00:00`) > new Date()) {
+      setEditFormError('Date of birth cannot be in the future.');
+      return;
+    }
+    if (editAge === null || editAge < MIN_AGE || editAge > MAX_AGE) {
+      setEditFormError(`Age must be between ${MIN_AGE} and ${MAX_AGE} years.`);
+      return;
+    }
+    if (!/^\d{12}$/.test(editAadhaarNumber)) {
+      setEditFormError('Aadhaar number must contain exactly 12 digits.');
+      return;
+    }
+    if (!PAN_PATTERN.test(editPanNumber)) {
+      setEditFormError('Enter a valid PAN number (format: ABCDE1234F).');
+      return;
+    }
 
+    setIsSavingProfile(true);
     try {
       setEditFormError('');
       setProfileError('');
 
-      const updated = await updateOwnerRuralMart(currentMartId, {
+      const updates: OwnerRuralMartUpdate = {
         mart_name: editMartName.trim(),
         entrepreneur_name: editAadhaarName.trim(),
-        mobile_number: editMartMobile.trim(),
+        // The mart's own separate Mobile Number field was removed — rural_marts
+        // has one mobile_number column, and Primary Mobile Number is now its
+        // only source, avoiding the two-fields-one-column duplication.
+        mobile_number: editPrimaryMobile.trim(),
         district: editDistrict.trim(),
         block: editBlock.trim(),
         village: editVillage.trim(),
-        gst_number: editGstNumber.trim(),
-      } as any);
+        gst_number: editGstNumber.trim() || null,
+        physical_address: editPhysicalAddress.trim(),
+        secondary_mobile: editSecondaryMobile.trim() || null,
+        date_of_birth: editDob,
+        gender: editGender,
+        qualification: editQualification.trim(),
+        address_permanent: editAddressPermanent.trim(),
+        address_temporary: editAddressTemporary.trim() || null,
+        aadhaar_number: editAadhaarNumber,
+        pan_number: editPanNumber,
+        bank_account_number: editBankAccountNumber.trim(),
+        ifsc_code: editIfscCode.trim(),
+        bank_name: editBankName.trim(),
+        branch: editBranch.trim(),
+      };
 
-      setLiveMart((current) => ({ ...(current ?? updated), ...updated }));
-      setOwnerName(editAadhaarName.trim());
-      setCompanyName(editMartName.trim());
-      setPhone(editPrimaryMobile.trim());
+      // Only upload + include a photo URL if the owner actually picked a new
+      // file — otherwise leave whatever's already stored untouched.
+      if (editMartPhoto) {
+        updates.mart_photo_url = await uploadOwnerMartPhoto(currentMartId, editMartPhoto);
+      }
+      if (editSelfie) {
+        updates.entrepreneur_photo_url = await uploadOwnerEntrepreneurPhoto(currentMartId, editSelfie);
+      }
+
+      const updated = await updateOwnerRuralMart(currentMartId, updates);
+
+      setLiveMart(updated);
       setIsEditProfileOpen(false);
       showToast('Rural Mart and entrepreneur profile updated successfully!');
     } catch (error) {
-      setProfileError(
-        error && typeof error === 'object' && 'message' in error
-          ? String((error as { message: unknown }).message)
-          : 'Unable to update owner profile.',
-      );
+      // Shown inside the still-open modal — the page-level error banner sits
+      // behind the modal overlay and would never be seen here.
+      setEditFormError(readableError(error));
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -317,6 +412,12 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
         </div>
       )}
 
+      {isLoadingMart && (
+        <div className="p-3.5 rounded-xl bg-[#F8FAF7] dark:bg-[#16241E] text-[#174F3A] dark:text-[#A3E6C5] border border-[#DDE6E0] dark:border-[#1E3129] text-xs font-semibold">
+          Loading your Rural Mart profile...
+        </div>
+      )}
+
       {/* PAGE HEADER */}
       <div className="bg-white dark:bg-[#121E19] border border-[#DDE6E0] dark:border-[#1E3129] rounded-xl p-4 sm:p-5 shadow-xs">
         <h1 className="text-xl font-bold text-[#17221D] dark:text-[#E6ECE8]">
@@ -331,7 +432,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
       <div className="bg-[#174F3A] dark:bg-[#12261E] border border-[#1E4233] rounded-2xl p-5 sm:p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           {/* Profile Photo / Avatar */}
-          <div className="w-14 h-14 rounded-2xl bg-[#23634C] dark:bg-[#1B3A2E] border-2 border-[#A3E6C5]/30 flex items-center justify-center shrink-0 shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-[#23634C] dark:bg-[#1B3A2E] border-2 border-[#A3E6C5]/30 flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
             <User className="w-7 h-7 text-[#A3E6C5]" />
           </div>
 
@@ -357,7 +458,8 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
 
         <button
           onClick={handleOpenEditProfile}
-          className="h-9 px-4 rounded-xl bg-white text-[#174F3A] hover:bg-emerald-50 text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0 self-start md:self-auto"
+          disabled={!liveMart}
+          className="h-9 px-4 rounded-xl bg-white text-[#174F3A] hover:bg-emerald-50 text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer shrink-0 self-start md:self-auto disabled:opacity-60 disabled:cursor-not-allowed"
         >
           <Edit2 className="w-3.5 h-3.5" />
           <span>Edit Profile Details</span>
@@ -415,12 +517,12 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
           </div>
         </div>
 
-        {/* Card 2: Trade License & Location */}
+        {/* Card 2: Location */}
         <div className="card-enterprise p-4 sm:p-5 space-y-3">
           <div className="flex items-center gap-2 border-b border-[#E9EFEB] dark:border-[#16241E] pb-3">
             <FileCheck className="w-4 h-4 text-[#174F3A] dark:text-[#A3E6C5]" />
             <h3 className="text-xs font-bold text-[#17221D] dark:text-[#E6ECE8] uppercase tracking-wider">
-              TRADE LICENSE & LOCATION
+              LOCATION
             </h3>
           </div>
 
@@ -435,11 +537,11 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
             </div>
 
             <div>
-              <span className="text-[10px] font-bold text-[#66736C] dark:text-[#8E9E96] uppercase block mb-1">
-                TRADE LICENSE STATUS
+              <span className="text-[10px] font-bold text-[#66736C] dark:text-[#8E9E96] uppercase block">
+                PHYSICAL ADDRESS
               </span>
-              <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-[#143825] dark:text-emerald-300 text-[11px] font-extrabold inline-block">
-                Active until Dec 2026
+              <span className="font-semibold text-[#17221D] dark:text-[#E6ECE8]">
+                {liveMart?.physical_address || 'Not provided'}
               </span>
             </div>
           </div>
@@ -561,7 +663,8 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                     <input type="text" disabled value={displayedOwnerId} className={`${fieldInputDisabledClass} font-mono`} />
                   </div>
 
-                  {/* Registered Email — READ ONLY */}
+                  {/* Registered Email — READ ONLY. Changing it here wouldn't change the
+                      actual Supabase Auth login email, so it's intentionally not editable. */}
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Registered Email ID</label>
                     <input type="email" disabled value={editEmail} className={fieldInputDisabledClass} />
@@ -570,11 +673,6 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Rural Mart Name <span className="text-red-500">*</span></label>
                     <input type="text" required value={editMartName} onChange={(e) => setEditMartName(e.target.value)} className={fieldInputClass} />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className={fieldLabelClass}>Mobile Number <span className="text-red-500">*</span></label>
-                    <input type="tel" required value={editMartMobile} onChange={(e) => setEditMartMobile(e.target.value)} className={fieldInputClass} />
                   </div>
 
                   <div className="space-y-1">
@@ -616,15 +714,10 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                     <label className={fieldLabelClass}>Rural Mart Photo</label>
                     <label className={fieldFileWrapClass}>
                       <span>Choose file</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => setEditMartPhoto(e.target.files?.[0] ?? null)}
-                      />
+                      <input type="file" accept="image/*" className="hidden" onChange={handleMartPhotoChange} />
                     </label>
                     <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96] ml-1">
-                      {editMartPhoto ? editMartPhoto.name : 'No new file chosen'}
+                      {editMartPhoto ? editMartPhoto.name : currentMartPhotoUrl ? 'Photo on file — choose a file to replace it' : 'No file chosen'}
                     </span>
                   </div>
                 </div>
@@ -647,33 +740,35 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
 
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Primary Mobile Number <span className="text-red-500">*</span></label>
-                    <input type="tel" required value={editPrimaryMobile} onChange={(e) => setEditPrimaryMobile(e.target.value)} className={fieldInputClass} />
+                    <input type="tel" required value={editPrimaryMobile} onChange={(e) => handleMobileChange(setEditPrimaryMobile)(e.target.value)} className={fieldInputClass} />
                   </div>
 
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Secondary Mobile Number</label>
-                    <input type="tel" value={editSecondaryMobile} onChange={(e) => setEditSecondaryMobile(e.target.value)} className={fieldInputClass} placeholder="Optional" />
+                    <input type="tel" value={editSecondaryMobile} onChange={(e) => handleMobileChange(setEditSecondaryMobile)(e.target.value)} className={fieldInputClass} placeholder="Optional" />
                   </div>
-                  
+
+                  {/* Read-only — mirrors "Registered Email ID" above; see note there. */}
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Email ID</label>
-                    <input
-                      type="email"
-                      value={editEmail}
-                      onChange={(e) => setEditEmail(e.target.value)}
-                      className={fieldInputClass}
-                      placeholder="Enter email address"
-                    />
+                    <input type="email" disabled value={editEmail} className={fieldInputDisabledClass} />
                   </div>
 
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Date of Birth <span className="text-red-500">*</span></label>
-                    <input type="date" required value={editDob} onChange={(e) => setEditDob(e.target.value)} className={fieldInputClass} />
+                    <input
+                      type="date"
+                      required
+                      max={new Date().toISOString().slice(0, 10)}
+                      value={editDob}
+                      onChange={(e) => setEditDob(e.target.value)}
+                      className={fieldInputClass}
+                    />
                   </div>
 
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Age</label>
-                    <input type="text" disabled value={editAge || '—'} className={fieldInputDisabledClass} />
+                    <input type="text" disabled value={editAge !== null ? `${editAge} years` : '—'} className={fieldInputDisabledClass} />
                   </div>
 
                   <div className="space-y-1">
@@ -703,27 +798,30 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
 
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Aadhaar Number <span className="text-red-500">*</span></label>
-                    <input type="text" required value={editAadhaarNumber} onChange={(e) => setEditAadhaarNumber(e.target.value)} className={fieldInputClass} placeholder="1234 5678 9012" />
+                    <input
+                      type="text"
+                      required
+                      inputMode="numeric"
+                      value={formatAadhaarDisplay(editAadhaarNumber)}
+                      onChange={(e) => handleAadhaarChange(e.target.value)}
+                      className={fieldInputClass}
+                      placeholder="1234 5678 9012"
+                    />
                   </div>
 
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>PAN Number <span className="text-red-500">*</span></label>
-                    <input type="text" required value={editPanNumber} onChange={(e) => setEditPanNumber(e.target.value.toUpperCase())} className={fieldInputClass} placeholder="ABCDE1234F" />
+                    <input type="text" required value={editPanNumber} onChange={(e) => handlePanChange(e.target.value)} className={fieldInputClass} placeholder="ABCDE1234F" />
                   </div>
 
                   <div className="space-y-1">
                     <label className={fieldLabelClass}>Entrepreneur Selfie</label>
                     <label className={fieldFileWrapClass}>
                       <span>Choose file</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => setEditSelfie(e.target.files?.[0] ?? null)}
-                      />
+                      <input type="file" accept="image/*" className="hidden" onChange={handleSelfieChange} />
                     </label>
                     <span className="text-[11px] text-[#66736C] dark:text-[#8E9E96] ml-1">
-                      {editSelfie ? editSelfie.name : 'No new file chosen'}
+                      {editSelfie ? editSelfie.name : currentEntrepreneurPhotoUrl ? 'Photo on file — choose a file to replace it' : 'No file chosen'}
                     </span>
                   </div>
                 </div>
@@ -737,7 +835,7 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className={fieldLabelClass}>Bank Account Number <span className="text-red-500">*</span></label>
-                      <input type="text" required value={editBankAccountNumber} onChange={(e) => setEditBankAccountNumber(e.target.value)} className={fieldInputClass} />
+                      <input type="text" required inputMode="numeric" value={editBankAccountNumber} onChange={(e) => setEditBankAccountNumber(e.target.value.replace(/\D/g, ''))} className={fieldInputClass} />
                     </div>
                     <div className="space-y-1">
                       <label className={fieldLabelClass}>IFSC Code <span className="text-red-500">*</span></label>
@@ -782,9 +880,10 @@ export const OwnerSettingsPage: React.FC<OwnerSettingsPageProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="h-9 px-4 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer"
+                  disabled={isSavingProfile}
+                  className="h-9 px-4 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-60"
                 >
-                  Save Changes
+                  {isSavingProfile ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
 

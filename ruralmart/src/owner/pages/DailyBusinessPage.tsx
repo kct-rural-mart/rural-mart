@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Search,
   X,
@@ -21,10 +21,7 @@ import {
   Building2,
   Phone,
 } from 'lucide-react';
-import { getOwnerFarmers } from '../../ownerMockData';
 import {
-  getFarmersByRuralMart,
-  deleteFarmer,
   getOperationalEntries,
   updateOperationalEntry,
   deleteOperationalEntry,
@@ -33,6 +30,7 @@ import {
   getProductsByRuralMart,
   BillLineItem,
 } from '../../shared/dataServices';
+import { getBillingFarmers, deleteBillingFarmer } from '../services/billingService';
 import { CanonicalFarmer } from '../../shared/types/storage';
 import { BillingPanel, BillingPanelHandle } from '../components/BillingPanel';
 
@@ -153,10 +151,29 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   // View Customer Modal State (Owner-side equivalent of Admin Purchase History Modal)
   const [viewFarmer, setViewFarmer] = useState<CanonicalFarmer | null>(null);
 
-  // All registered farmers for the Registered Customers directory panel
-  const allRegisteredFarmers = useMemo(() => {
-    return getFarmersByRuralMart(RURAL_MART_ID);
-  }, [refreshKey]);
+  // All registered farmers for the Registered Customers directory panel (live from Supabase)
+  const [allRegisteredFarmers, setAllRegisteredFarmers] = useState<CanonicalFarmer[]>([]);
+  const [farmerDirectoryError, setFarmerDirectoryError] = useState<string>('');
+
+  useEffect(() => {
+    let active = true;
+    if (!RURAL_MART_ID) {
+      setAllRegisteredFarmers([]);
+      return;
+    }
+    setFarmerDirectoryError('');
+    void getBillingFarmers(RURAL_MART_ID)
+      .then((farmers) => { if (active) setAllRegisteredFarmers(farmers); })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setFarmerDirectoryError(
+          error && typeof error === 'object' && 'message' in error
+            ? String((error as { message: unknown }).message)
+            : 'Unable to load registered customers.',
+        );
+      });
+    return () => { active = false; };
+  }, [RURAL_MART_ID, refreshKey]);
 
   // Purchase history & summary for the customer currently open in the View modal
   const viewFarmerSales = useMemo(() => {
@@ -243,13 +260,22 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
   };
 
   // Registered Customers panel: Delete action (confirmation required)
-  const handleDeleteFarmer = (f: CanonicalFarmer) => {
+  const handleDeleteFarmer = async (f: CanonicalFarmer) => {
     const confirmed = window.confirm(
       `Are you sure you want to delete customer "${f.name}" (${f.farmerCode || f.id})? This action cannot be undone.`
     );
     if (!confirmed) return;
 
-    deleteFarmer(f.id);
+    try {
+      await deleteBillingFarmer(f.id);
+    } catch (error) {
+      setFarmerDirectoryError(
+        error && typeof error === 'object' && 'message' in error
+          ? String((error as { message: unknown }).message)
+          : 'Unable to delete this customer.',
+      );
+      return;
+    }
 
     billingPanelRef.current?.clearIfMatches(f.id, f.farmerCode);
     if (attachedFarmer && (attachedFarmer.id === f.id || attachedFarmer.farmerCode === f.farmerCode)) {
@@ -472,6 +498,12 @@ export const DailyBusinessPage: React.FC<DailyBusinessPageProps> = ({
               </p>
             </div>
           </div>
+
+          {farmerDirectoryError && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-[#381414] border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 text-xs font-semibold">
+              {farmerDirectoryError}
+            </div>
+          )}
 
           <div className="space-y-3">
             {allRegisteredFarmers.length === 0 ? (

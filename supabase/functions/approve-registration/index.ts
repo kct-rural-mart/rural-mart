@@ -256,17 +256,34 @@ Deno.serve(async (req) => {
         block: registration.block,
         village: registration.village,
         opening_date: registration.opening_date,
-        aadhaar_number: registration.aadhaar_number,
         gst_number: registration.gst_number,
         // The old single-photo form wrote to `photo_url`; the redesigned form
         // writes to `mart_photo_url` instead. Falling back to `photo_url` keeps
         // registrations submitted before this change (which only ever populated
         // that column) working the same as they always did.
         photo_url: registration.mart_photo_url ?? registration.photo_url,
-        // Entrepreneur KYC + bank fields captured at registration (physical_address,
-        // entrepreneur_*, bank_*, ifsc_code, entrepreneur_photo_url) are intentionally
-        // not copied onto rural_marts yet — it has no matching columns for them. They
-        // remain readable from pending_registrations via rural_marts.registration_id.
+        mart_photo_url: registration.mart_photo_url,
+        entrepreneur_photo_url: registration.entrepreneur_photo_url,
+        // Entrepreneur KYC + bank fields, now that rural_marts has matching
+        // columns for them (see the KYC-fields migration) — this is the one
+        // moment this data naturally moves from "submitted" to "current".
+        physical_address: registration.physical_address,
+        secondary_mobile: registration.entrepreneur_secondary_mobile,
+        date_of_birth: registration.entrepreneur_dob,
+        gender: registration.entrepreneur_gender,
+        qualification: registration.entrepreneur_qualification,
+        address_permanent: registration.entrepreneur_address_permanent,
+        address_temporary: registration.entrepreneur_address_temporary,
+        // rural_marts reuses its existing aadhaar_number column for the
+        // entrepreneur's Aadhaar rather than adding a duplicate. Falls back to
+        // the old mart-level field for registrations submitted before the KYC
+        // redesign, which never populated entrepreneur_aadhaar_number.
+        aadhaar_number: registration.entrepreneur_aadhaar_number ?? registration.aadhaar_number,
+        pan_number: registration.entrepreneur_pan_number,
+        bank_account_number: registration.bank_account_number,
+        ifsc_code: registration.ifsc_code,
+        bank_name: registration.bank_name,
+        branch: registration.bank_branch,
       })
       .select()
       .single()

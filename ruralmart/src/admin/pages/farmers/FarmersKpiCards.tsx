@@ -12,14 +12,31 @@ import { FarmerOutreachMartRecord } from '../../../shared/types';
 
 interface FarmersKpiCardsProps {
   outreachMarts: FarmerOutreachMartRecord[];
+  /**
+   * Total/New/Repeat Farmers are computed by the caller (from the currently
+   * filtered farmer records, deduped by phone number) rather than summed here
+   * from outreachMarts — a person registered at two marts is one person, not
+   * two, at the network level. Farmers Reached, Outreach Programs, and Animal
+   * Population Covered stay as straight per-mart sums below: they're either
+   * already correctly per-mart, or (Farmers Reached) aren't tied to individual
+   * farmer records at all, so there's nothing to dedupe.
+   */
+  totalRegisteredFarmers: number;
+  totalNewFarmers: number;
+  totalRepeatFarmers: number;
 }
 
-export const FarmersKpiCards: React.FC<FarmersKpiCardsProps> = ({ outreachMarts }) => {
+export const FarmersKpiCards: React.FC<FarmersKpiCardsProps> = ({
+  outreachMarts,
+  totalRegisteredFarmers,
+  totalNewFarmers,
+  totalRepeatFarmers,
+}) => {
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
 
-  const totalRegistered = outreachMarts.reduce((acc, m) => acc + (m.totalRegisteredFarmers || 0), 0);
-  const totalNew = outreachMarts.reduce((acc, m) => acc + (m.newFarmers || 0), 0);
-  const totalRepeat = outreachMarts.reduce((acc, m) => acc + (m.repeatFarmers || 0), 0);
+  const totalRegistered = totalRegisteredFarmers;
+  const totalNew = totalNewFarmers;
+  const totalRepeat = totalRepeatFarmers;
   const totalReached = outreachMarts.reduce((acc, m) => acc + (m.farmersReached || 0), 0);
   const totalPrograms = outreachMarts.reduce((acc, m) => acc + (m.outreachProgramsConducted || 0), 0);
   const totalAnimalPop = outreachMarts.reduce((acc, m) => acc + (m.animalPopulationCovered || 0), 0);
@@ -30,28 +47,28 @@ export const FarmersKpiCards: React.FC<FarmersKpiCardsProps> = ({ outreachMarts 
       label: 'Total Registered Farmers',
       value: totalRegistered.toLocaleString('en-IN'),
       icon: Users,
-      tooltip: 'Total cumulative farmers registered across all active Rural Marts in EDF records.',
+      tooltip: 'Distinct farmers registered across Rural Marts in EDF records — counted once per person, even if registered at more than one mart.',
     },
     {
       id: 'new-farmers',
       label: 'New Farmers',
       value: totalNew.toLocaleString('en-IN'),
       icon: UserPlus,
-      tooltip: 'First-time registered farmers onboarded during current reporting cycle.',
+      tooltip: 'Farmers with exactly one purchase at a mart, counted once per person network-wide.',
     },
     {
       id: 'repeat-farmers',
       label: 'Repeat Farmers',
       value: totalRepeat.toLocaleString('en-IN'),
       icon: RotateCw,
-      tooltip: 'Farmers with 2 or more transactions or visits to Rural Marts.',
+      tooltip: 'Farmers with 2+ purchases at the same Rural Mart, counted once per person network-wide.',
     },
     {
       id: 'farmers-reached',
       label: 'Farmers Reached',
       value: totalReached.toLocaleString('en-IN'),
       icon: Target,
-      tooltip: 'Farmers directly participating in health camps, training workshops, and melas.',
+      tooltip: 'Attendance reported by owners when logging outreach sessions (health camps, workshops, melas). Not tied to individual farmer records, so a person attending sessions at two marts is not currently deduplicated here.',
     },
     {
       id: 'outreach-programs',

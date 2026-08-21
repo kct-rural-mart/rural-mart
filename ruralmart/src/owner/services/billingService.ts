@@ -88,6 +88,11 @@ export async function updateBillingFarmer(farmerId: string, input: { name: strin
   if (error) throw error;
 }
 
+export async function deleteBillingFarmer(farmerId: string) {
+  const { error } = await supabase.from('farmers').delete().eq('id', farmerId);
+  if (error) throw error;
+}
+
 export async function recordBillingSale(input: {
   ruralMartId: string;
   farmerId: string;

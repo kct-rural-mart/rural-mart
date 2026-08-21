@@ -14,13 +14,14 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import {
-  getFarmersByRuralMart,
-  saveFarmer,
-  updateFarmer,
-  getProductsByRuralMart,
-  recordCustomerBill,
-  BillLineItem,
-} from '../../shared/dataServices';
+  getBillingProducts,
+  getBillingFarmers,
+  addBillingFarmer,
+  updateBillingFarmer,
+  recordBillingSale,
+} from '../services/billingService';
+import { PRODUCT_CATEGORIES } from '../services/productService';
+import type { BillLineItem } from '../../shared/dataServices';
 import { CanonicalProduct, CanonicalFarmer } from '../../shared/types/storage';
 
 // This panel is the SINGLE reusable "Farmer Purchase & Bill Entry" billing experience.
@@ -28,6 +29,22 @@ import { CanonicalProduct, CanonicalFarmer } from '../../shared/types/storage';
 // "Daily Sale" Quick Action modal — both consumers get the exact same UI, state, and
 // business logic (customer search/select/register, product selection, bill draft,
 // bill generation, stock deduction) with no duplicated implementation.
+//
+// Product/farmer/bill data all comes from Supabase via services/billingService.ts —
+// the real products/farmers/sales tables, scoped to this rural_mart_id. Bill generation
+// calls the record_sale RPC, which deducts stock atomically in the same transaction.
+
+function readableError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object') {
+    const value = error as { message?: string; details?: string; hint?: string; code?: string };
+    const detail = [value.message, value.details, value.hint, value.code ? `Code: ${value.code}` : '']
+      .filter(Boolean)
+      .join(' — ');
+    if (detail) return detail;
+  }
+  return 'Something went wrong. Please try again.';
+}
 
 export interface BillingPanelHandle {
   /** Attach an existing registered farmer/customer to the bill (used by an external Registered Customers panel). */
@@ -58,8 +75,25 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     const [localRefresh, setLocalRefresh] = useState<number>(0);
     const bumpLocal = () => setLocalRefresh((k) => k + 1);
 
-    const catalogProducts = useMemo(() => {
-      return getProductsByRuralMart(ruralMartId);
+    // --- CATALOG PRODUCTS (live from Supabase) ---
+    const [catalogProducts, setCatalogProducts] = useState<CanonicalProduct[]>([]);
+    const [catalogLoading, setCatalogLoading] = useState<boolean>(true);
+    const [catalogError, setCatalogError] = useState<string>('');
+
+    useEffect(() => {
+      let active = true;
+      if (!ruralMartId) {
+        setCatalogProducts([]);
+        setCatalogLoading(false);
+        return;
+      }
+      setCatalogLoading(true);
+      setCatalogError('');
+      void getBillingProducts(ruralMartId)
+        .then((products) => { if (active) setCatalogProducts(products); })
+        .catch((error: unknown) => { if (active) setCatalogError(readableError(error)); })
+        .finally(() => { if (active) setCatalogLoading(false); });
+      return () => { active = false; };
     }, [ruralMartId, refreshKey, localRefresh]);
 
     // --- FARMER LOOKUP & CUSTOMER STATE ---
@@ -72,11 +106,28 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     const [editFarmerName, setEditFarmerName] = useState<string>('');
     const [editFarmerVillage, setEditFarmerVillage] = useState<string>('');
     const [farmerUpdateMsg, setFarmerUpdateMsg] = useState<string>('');
+    const [isSavingFarmer, setIsSavingFarmer] = useState<boolean>(false);
 
-    // All registered farmers for customer selection/search
-    const allRegisteredFarmers = useMemo(() => {
-      return getFarmersByRuralMart(ruralMartId);
-    }, [ruralMartId, refreshKey, localRefresh, matchedFarmer]);
+    // All registered farmers for customer selection/search (live from Supabase)
+    const [allRegisteredFarmers, setAllRegisteredFarmers] = useState<CanonicalFarmer[]>([]);
+    const [farmersLoading, setFarmersLoading] = useState<boolean>(true);
+    const [farmersError, setFarmersError] = useState<string>('');
+
+    useEffect(() => {
+      let active = true;
+      if (!ruralMartId) {
+        setAllRegisteredFarmers([]);
+        setFarmersLoading(false);
+        return;
+      }
+      setFarmersLoading(true);
+      setFarmersError('');
+      void getBillingFarmers(ruralMartId)
+        .then((farmers) => { if (active) setAllRegisteredFarmers(farmers); })
+        .catch((error: unknown) => { if (active) setFarmersError(readableError(error)); })
+        .finally(() => { if (active) setFarmersLoading(false); });
+      return () => { active = false; };
+    }, [ruralMartId, refreshKey, localRefresh]);
 
     // Live search results (Google-like autocomplete) — filters by name, mobile, Farmer ID, farmerCode
     const liveSearchResults = useMemo(() => {
@@ -103,40 +154,26 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [matchedFarmer]);
 
-    // New Customer Form State
+    // New Customer Form State — trimmed to exactly what the farmers table stores
+    // (name, mobile, village, cattle_count). Gram Panchayat / District / Other
+    // Livestock were removed: there's nowhere in the real schema to save them.
     const [newName, setNewName] = useState<string>('');
     const [newMobile, setNewMobile] = useState<string>('');
     const [newVillage, setNewVillage] = useState<string>('');
-    const [newGramPanchayat, setNewGramPanchayat] = useState<string>('');
-    const [newDistrict, setNewDistrict] = useState<string>('Erode');
     const [numCattle, setNumCattle] = useState<string>('');
-    const [numOtherLivestock, setNumOtherLivestock] = useState<string>('');
     const [newCustomerErrors, setNewCustomerErrors] = useState<Record<string, string>>({});
-
-    // Auto-generated registration date string (e.g., "12 Aug 2026")
-    const currentFormattedDate = useMemo(() => {
-      const d = new Date();
-      return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    }, []);
-
-    // Calculated Total Animal Population
-    const calculatedTotalAnimals = useMemo(() => {
-      const cattle = Number(numCattle) || 0;
-      const livestock = Number(numOtherLivestock) || 0;
-      return cattle + livestock;
-    }, [numCattle, numOtherLivestock]);
+    const [isRegisteringFarmer, setIsRegisteringFarmer] = useState<boolean>(false);
 
     // --- FARMER PURCHASE / BILL FORM DRAFT STATE ---
     const [selectedCategory, setSelectedCategory] = useState<string>('All Categories');
-    const [customCategoryText, setCustomCategoryText] = useState<string>('');
     const [selectedProductId, setSelectedProductId] = useState<string>('');
-    const [customProductText, setCustomProductText] = useState<string>('');
     const [inputQuantity, setInputQuantity] = useState<string>('');
     const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'UPI / Online' | 'Credit / Due'>('Cash');
 
     const [billDraftItems, setBillDraftItems] = useState<BillLineItem[]>([]);
     const [billError, setBillError] = useState<string>('');
     const [billSuccessMsg, setBillSuccessMsg] = useState<string>('');
+    const [isGeneratingBill, setIsGeneratingBill] = useState<boolean>(false);
 
     // Filter products by selected category
     const filteredCatalogProducts = useMemo(() => {
@@ -234,7 +271,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
     };
 
     // Generate Customer Bill & Complete Transaction
-    const handleGenerateBill = (e: React.FormEvent) => {
+    const handleGenerateBill = async (e: React.FormEvent) => {
       e.preventDefault();
       setBillError('');
       setBillSuccessMsg('');
@@ -249,40 +286,43 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
         return;
       }
 
-      const result = recordCustomerBill(ruralMartId, {
-        farmerId: matchedFarmer.id,
-        farmerName: matchedFarmer.name,
-        paymentMethod,
-        lineItems: billDraftItems,
-      });
+      setIsGeneratingBill(true);
+      try {
+        const result = await recordBillingSale({
+          ruralMartId,
+          farmerId: matchedFarmer.id,
+          items: billDraftItems.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          })),
+        });
 
-      if (!result.success) {
-        setBillError(result.errorMessage || 'Failed to complete bill transaction.');
-        return;
+        const billAmount = totalBillAmount;
+        const customerName = matchedFarmer.name;
+
+        setBillSuccessMsg(
+          `Customer Bill #${result.billNumber} successfully generated for ${customerName} (₹${billAmount.toLocaleString('en-IN')})! Stock deducted.`
+        );
+
+        // Reset bill draft form
+        setBillDraftItems([]);
+        setSelectedProductId('');
+        setInputQuantity('');
+
+        // Trigger refresh for this panel's own data (stock changed) + notify hosting page
+        bumpLocal();
+        onDataChanged?.();
+        onSaleGenerated?.({ billNumber: result.billNumber, amount: billAmount, customerName });
+
+        setTimeout(() => {
+          setBillSuccessMsg('');
+        }, 5000);
+      } catch (error) {
+        setBillError(readableError(error));
+      } finally {
+        setIsGeneratingBill(false);
       }
-
-      const billAmount = totalBillAmount;
-      const billNumber = result.billNumber || '';
-      const customerName = matchedFarmer.name;
-
-      // Success!
-      setBillSuccessMsg(
-        `Customer Bill #${billNumber} successfully generated for ${customerName} (₹${billAmount.toLocaleString('en-IN')})! Stock deducted.`
-      );
-
-      // Reset bill draft form
-      setBillDraftItems([]);
-      setSelectedProductId('');
-      setInputQuantity('');
-
-      // Trigger refresh for this panel's own data + notify hosting page
-      bumpLocal();
-      onDataChanged?.();
-      onSaleGenerated?.({ billNumber, amount: billAmount, customerName });
-
-      setTimeout(() => {
-        setBillSuccessMsg('');
-      }, 5000);
     };
 
     // Clear Bill Draft
@@ -338,7 +378,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       setEditFarmerVillage(matchedFarmer.village);
     };
 
-    const handleSaveChangesFarmer = (e: React.FormEvent) => {
+    const handleSaveChangesFarmer = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!matchedFarmer) return;
 
@@ -346,32 +386,40 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       const updatedVillage = editFarmerVillage || matchedFarmer.village;
       const updatedCount = Number(editCattleCount) || 0;
 
-      if (matchedFarmer.id) {
-        updateFarmer(matchedFarmer.id, {
+      setIsSavingFarmer(true);
+      try {
+        if (matchedFarmer.id) {
+          await updateBillingFarmer(matchedFarmer.id, {
+            name: updatedName,
+            village: updatedVillage,
+            cattleCount: updatedCount,
+          });
+        }
+
+        setMatchedFarmer((prev: any) => ({
+          ...prev,
           name: updatedName,
           village: updatedVillage,
+          cattleCount: updatedCount,
           animalHeadCount: updatedCount,
-        });
+        }));
+
+        setIsEditingFarmer(false);
+        setFarmerUpdateMsg('Customer details updated successfully.');
+        setTimeout(() => setFarmerUpdateMsg(''), 3000);
+
+        bumpLocal();
+        onDataChanged?.();
+      } catch (error) {
+        setFarmerUpdateMsg('');
+        setBillError(readableError(error));
+      } finally {
+        setIsSavingFarmer(false);
       }
-
-      setMatchedFarmer((prev: any) => ({
-        ...prev,
-        name: updatedName,
-        village: updatedVillage,
-        cattleCount: updatedCount,
-        animalHeadCount: updatedCount,
-      }));
-
-      setIsEditingFarmer(false);
-      setFarmerUpdateMsg('Customer details updated successfully.');
-      setTimeout(() => setFarmerUpdateMsg(''), 3000);
-
-      bumpLocal();
-      onDataChanged?.();
     };
 
     // New Customer Registration
-    const handleSaveNewCustomer = (e: React.FormEvent) => {
+    const handleSaveNewCustomer = async (e: React.FormEvent) => {
       e.preventDefault();
       const errors: Record<string, string> = {};
 
@@ -385,8 +433,6 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       }
 
       if (!newVillage.trim()) errors.village = 'Village is required.';
-      if (!newGramPanchayat.trim()) errors.gramPanchayat = 'Gram Panchayat is required.';
-      if (!newDistrict.trim()) errors.district = 'District is required.';
 
       if (Object.keys(errors).length > 0) {
         setNewCustomerErrors(errors);
@@ -394,67 +440,59 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
       }
 
       const cattleCount = Number(numCattle) || 0;
-      const otherLivestockCount = Number(numOtherLivestock) || 0;
-      const totalAnimals = cattleCount + otherLivestockCount;
 
-      const newFarmerId = `FMR-${1040 + Math.floor(Math.random() * 8000)}`;
+      setIsRegisteringFarmer(true);
+      try {
+        const created = await addBillingFarmer({
+          ruralMartId,
+          name: newName.trim(),
+          mobile: cleanMobile,
+          village: newVillage.trim(),
+          cattleCount,
+        });
 
-      const farmerRecord: CanonicalFarmer = {
-        id: newFarmerId,
-        farmerCode: newFarmerId,
-        ruralMartId,
-        name: newName.trim(),
-        phone: cleanMobile.startsWith('+91') ? cleanMobile : `+91 ${cleanMobile}`,
-        village: newVillage.trim(),
-        gramPanchayat: newGramPanchayat.trim(),
-        district: newDistrict.trim(),
-        registrationDate: currentFormattedDate,
-        numCattle: cattleCount,
-        numOtherLivestock: otherLivestockCount,
-        totalAnimalPopulation: totalAnimals,
-        animalHeadCount: totalAnimals,
-        category: 'Dairy Farmer',
-        lastVisit: 'Today',
-        status: 'New',
-        totalPurchases: 0,
-        totalSpent: 0,
-        totalPurchasesVal: 0,
-        joinedDate: currentFormattedDate,
-      };
+        const createdFarmer = {
+          id: created.id,
+          farmerCode: created.farmer_code,
+          ruralMartId: created.rural_mart_id,
+          name: created.name,
+          phone: created.mobile,
+          village: created.village ?? '',
+          registrationDate: created.created_at,
+          animalHeadCount: created.cattle_count ?? 0,
+          numCattle: created.cattle_count ?? 0,
+          cattleCount: created.cattle_count ?? 0,
+          tempId: created.farmer_code,
+          lastPurchase: 'No prior purchase',
+          totalVisits: 1,
+          joinedDate: created.created_at,
+        };
 
-      saveFarmer(farmerRecord);
+        setMatchedFarmer(createdFarmer);
+        setEditCattleCount(String(cattleCount));
+        setEditFarmerName(createdFarmer.name);
+        setEditFarmerVillage(createdFarmer.village);
 
-      const createdFarmer = {
-        ...farmerRecord,
-        tempId: newFarmerId,
-        cattleCount: cattleCount,
-        lastPurchase: 'No prior purchase',
-        totalVisits: 1,
-      };
+        // Reset form fields
+        setNewName('');
+        setNewMobile('');
+        setNewVillage('');
+        setNumCattle('');
+        setNewCustomerErrors({});
 
-      setMatchedFarmer(createdFarmer);
-      setEditCattleCount(String(totalAnimals));
-      setEditFarmerName(createdFarmer.name);
-      setEditFarmerVillage(createdFarmer.village);
+        setFarmerTab('existing');
+        setIsEditingFarmer(false);
 
-      // Reset form fields
-      setNewName('');
-      setNewMobile('');
-      setNewVillage('');
-      setNewGramPanchayat('');
-      setNewDistrict('Erode');
-      setNumCattle('');
-      setNumOtherLivestock('');
-      setNewCustomerErrors({});
+        setFarmerUpdateMsg(`Customer ${createdFarmer.name} registered & attached to bill.`);
+        setTimeout(() => setFarmerUpdateMsg(''), 4000);
 
-      setFarmerTab('existing');
-      setIsEditingFarmer(false);
-
-      setFarmerUpdateMsg(`Customer ${createdFarmer.name} registered & attached to bill.`);
-      setTimeout(() => setFarmerUpdateMsg(''), 4000);
-
-      bumpLocal();
-      onDataChanged?.();
+        bumpLocal();
+        onDataChanged?.();
+      } catch (error) {
+        setNewCustomerErrors({ mobile: readableError(error) });
+      } finally {
+        setIsRegisteringFarmer(false);
+      }
     };
 
     return (
@@ -482,6 +520,13 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
           <div className="p-3 rounded-xl bg-red-50 dark:bg-[#381414] border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 text-xs font-semibold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
             <span>{billError}</span>
+          </div>
+        )}
+
+        {(catalogError || farmersError) && (
+          <div className="p-3 rounded-xl bg-red-50 dark:bg-[#381414] border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+            <span>{catalogError || farmersError}</span>
           </div>
         )}
 
@@ -577,9 +622,10 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
 
                   <button
                     type="submit"
-                    className="px-4 h-8 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                    disabled={isSavingFarmer}
+                    className="px-4 h-8 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer disabled:opacity-60"
                   >
-                    Save Changes
+                    {isSavingFarmer ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </form>
@@ -615,18 +661,14 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
                   <div className="bg-white/60 dark:bg-[#121E19]/60 p-2 rounded-lg border border-emerald-200/50 dark:border-emerald-800/40">
-                    <span className="text-[#66736C] dark:text-[#8E9E96] block text-[10px]">Panchayat & District</span>
-                    <span className="font-bold text-[#17221D] dark:text-[#E6ECE8]">{matchedFarmer.gramPanchayat || matchedFarmer.village || 'N/A'}, {matchedFarmer.district || 'Erode'}</span>
+                    <span className="text-[#66736C] dark:text-[#8E9E96] block text-[10px]">Village</span>
+                    <span className="font-bold text-[#17221D] dark:text-[#E6ECE8]">{matchedFarmer.village || 'N/A'}</span>
                   </div>
                   <div className="bg-white/60 dark:bg-[#121E19]/60 p-2 rounded-lg border border-emerald-200/50 dark:border-emerald-800/40">
-                    <span className="text-[#66736C] dark:text-[#8E9E96] block text-[10px]">Cattle & Livestock</span>
-                    <span className="font-bold text-[#174F3A] dark:text-[#A3E6C5]">{matchedFarmer.numCattle ?? matchedFarmer.cattleCount ?? matchedFarmer.animalHeadCount ?? 0} Cattle • {matchedFarmer.numOtherLivestock ?? 0} Other</span>
-                  </div>
-                  <div className="bg-white/60 dark:bg-[#121E19]/60 p-2 rounded-lg border border-emerald-200/50 dark:border-emerald-800/40">
-                    <span className="text-[#66736C] dark:text-[#8E9E96] block text-[10px]">Total Animal Pop.</span>
-                    <span className="font-bold text-[#174F3A] dark:text-[#A3E6C5]">{matchedFarmer.totalAnimalPopulation ?? matchedFarmer.animalHeadCount ?? 0} Animals</span>
+                    <span className="text-[#66736C] dark:text-[#8E9E96] block text-[10px]">Cattle Count</span>
+                    <span className="font-bold text-[#174F3A] dark:text-[#A3E6C5]">{matchedFarmer.numCattle ?? matchedFarmer.cattleCount ?? matchedFarmer.animalHeadCount ?? 0}</span>
                   </div>
                   <div className="bg-white/60 dark:bg-[#121E19]/60 p-2 rounded-lg border border-emerald-200/50 dark:border-emerald-800/40">
                     <span className="text-[#66736C] dark:text-[#8E9E96] block text-[10px]">Reg. Date</span>
@@ -705,7 +747,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                               </span>
                             </div>
                             <div className="text-[10px] text-[#66736C] dark:text-[#8E9E96] mt-0.5">
-                              {f.phone} • {f.village}{f.district ? `, ${f.district}` : ''}
+                              {f.phone} • {f.village}
                             </div>
                           </button>
                         ))
@@ -713,7 +755,9 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                     </div>
                   )}
 
-                  {allRegisteredFarmers.length === 0 && (
+                  {farmersLoading ? (
+                    <p className="text-[11px] text-[#66736C] dark:text-[#8E9E96] pt-1">Loading registered customers...</p>
+                  ) : allRegisteredFarmers.length === 0 && (
                     <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium pt-1">
                       No registered farmers found. Switch to "+ Register New Customer" tab to register them.
                     </p>
@@ -755,7 +799,7 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                         placeholder="e.g. 9876543210"
                         value={newMobile}
                         onChange={(e) => {
-                          setNewMobile(e.target.value);
+                          setNewMobile(e.target.value.replace(/\D/g, '').slice(0, 10));
                           if (newCustomerErrors.mobile) setNewCustomerErrors((prev) => ({ ...prev, mobile: '' }));
                         }}
                         className={`w-full h-8 px-2.5 text-xs rounded-lg border bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8] ${
@@ -768,8 +812,8 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                     </div>
                   </div>
 
-                  {/* Row 2: Village, Gram Panchayat, District */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* Row 2: Village & Number of Cattle */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div className="space-y-1">
                       <label className="block text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
                         Village <span className="text-red-500">*</span>
@@ -793,63 +837,6 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
 
                     <div className="space-y-1">
                       <label className="block text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
-                        Gram Panchayat <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Athani GP"
-                        value={newGramPanchayat}
-                        onChange={(e) => {
-                          setNewGramPanchayat(e.target.value);
-                          if (newCustomerErrors.gramPanchayat) setNewCustomerErrors((prev) => ({ ...prev, gramPanchayat: '' }));
-                        }}
-                        className={`w-full h-8 px-2.5 text-xs rounded-lg border bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8] ${
-                          newCustomerErrors.gramPanchayat ? 'border-red-500' : 'border-[#DDE6E0] dark:border-[#1E3129]'
-                        }`}
-                      />
-                      {newCustomerErrors.gramPanchayat && (
-                        <p className="text-[10px] text-red-500 font-medium">{newCustomerErrors.gramPanchayat}</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
-                        District <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Erode"
-                        value={newDistrict}
-                        onChange={(e) => {
-                          setNewDistrict(e.target.value);
-                          if (newCustomerErrors.district) setNewCustomerErrors((prev) => ({ ...prev, district: '' }));
-                        }}
-                        className={`w-full h-8 px-2.5 text-xs rounded-lg border bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8] ${
-                          newCustomerErrors.district ? 'border-red-500' : 'border-[#DDE6E0] dark:border-[#1E3129]'
-                        }`}
-                      />
-                      {newCustomerErrors.district && (
-                        <p className="text-[10px] text-red-500 font-medium">{newCustomerErrors.district}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Row 3: Registration Date (Auto-generated), Number of Cattle (Optional), Number of Other Livestock (Optional) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    <div className="space-y-1">
-                      <label className="block text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
-                        Registration Date <span className="text-[10px] font-normal text-emerald-600 dark:text-emerald-400">(Auto-generated)</span>
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={currentFormattedDate}
-                        className="w-full h-8 px-2.5 text-xs font-semibold rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-slate-100 dark:bg-slate-800 text-[#17221D] dark:text-[#E6ECE8] cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
                         Number of Cattle <span className="text-[10px] font-normal text-slate-500">(Optional)</span>
                       </label>
                       <input
@@ -861,43 +848,15 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                         className="w-full h-8 px-2.5 text-xs rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
                       />
                     </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-xs font-bold text-[#17221D] dark:text-[#E6ECE8]">
-                        Number of Other Livestock <span className="text-[10px] font-normal text-slate-500">(Optional)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="e.g. 4"
-                        value={numOtherLivestock}
-                        onChange={(e) => setNumOtherLivestock(e.target.value)}
-                        className="w-full h-8 px-2.5 text-xs rounded-lg border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Calculated Field: Total Animal Population */}
-                  <div className="p-2.5 rounded-xl bg-emerald-50/70 dark:bg-[#143825]/50 border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-[#174F3A] dark:text-[#A3E6C5] block">
-                        Total Animal Population <span className="text-[10px] font-normal text-emerald-700 dark:text-emerald-300">(Calculated)</span>
-                      </span>
-                      <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96]">
-                        Cattle ({Number(numCattle) || 0}) + Other Livestock ({Number(numOtherLivestock) || 0})
-                      </span>
-                    </div>
-                    <span className="text-xs sm:text-sm font-extrabold text-[#174F3A] dark:text-[#A3E6C5] bg-white dark:bg-[#121E19] px-3 py-1 rounded-lg border border-emerald-300 dark:border-emerald-700">
-                      {calculatedTotalAnimals} Animals
-                    </span>
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full h-9 mt-1 bg-[#174F3A] hover:bg-[#103A2B] text-white text-xs font-extrabold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                    disabled={isRegisteringFarmer}
+                    className="w-full h-9 mt-1 bg-[#174F3A] hover:bg-[#103A2B] text-white text-xs font-extrabold rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
                   >
                     <UserPlus className="w-4 h-4" />
-                    <span>Register & Attach Customer to Bill</span>
+                    <span>{isRegisteringFarmer ? 'Registering...' : 'Register & Attach Customer to Bill'}</span>
                   </button>
                 </form>
               )}
@@ -920,31 +879,14 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
                 onChange={(e) => {
                   setSelectedCategory(e.target.value);
                   setSelectedProductId('');
-                  if (e.target.value !== 'Others') {
-                    setCustomCategoryText('');
-                  }
                 }}
                 className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
               >
                 <option value="All Categories">All Categories</option>
-                <option value="Feed">Cattle Feed</option>
-                <option value="Minerals">Minerals</option>
-                <option value="Seeds">Seeds</option>
-                <option value="Fertilizers">Fertilizers</option>
-                <option value="Pesticides">Pesticides</option>
-                <option value="Equip">Farm Tools</option>
-                <option value="Groceries">Groceries</option>
-                <option value="Others">Others</option>
+                {PRODUCT_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
               </select>
-              {selectedCategory === 'Others' && (
-                <input
-                  type="text"
-                  placeholder="Type custom category..."
-                  value={customCategoryText}
-                  onChange={(e) => setCustomCategoryText(e.target.value)}
-                  className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#174F3A] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                />
-              )}
             </div>
 
             {/* Product Selection */}
@@ -954,37 +896,24 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
               </label>
               <select
                 value={selectedProductId}
-                onChange={(e) => {
-                  setSelectedProductId(e.target.value);
-                  if (e.target.value !== '__CREATE_CUSTOM__') {
-                    setCustomProductText('');
-                  }
-                }}
+                onChange={(e) => setSelectedProductId(e.target.value)}
                 className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#DDE6E0] dark:border-[#1E3129] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
               >
-                <option value="">Select a product from inventory catalog</option>
+                <option value="">
+                  {catalogLoading ? 'Loading products...' : 'Select a product from inventory catalog'}
+                </option>
                 {filteredCatalogProducts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} — ₹{p.sellingPrice}/{p.unit || 'units'} ({p.stockQty} in stock)
                   </option>
                 ))}
-                <option value="__CREATE_CUSTOM__">+ Create / Others (Type Custom Product)</option>
               </select>
-              {selectedProductId === '__CREATE_CUSTOM__' && (
-                <input
-                  type="text"
-                  placeholder="Type product name / details..."
-                  value={customProductText}
-                  onChange={(e) => setCustomProductText(e.target.value)}
-                  className="w-full h-9 px-2.5 text-xs rounded-xl border border-[#174F3A] bg-[#F8FAF7] dark:bg-[#16241E] text-[#17221D] dark:text-[#E6ECE8]"
-                />
-              )}
             </div>
 
           </div>
 
           {/* No Products Alert */}
-          {catalogProducts.length === 0 && (
+          {!catalogLoading && catalogProducts.length === 0 && (
             <div className="p-3 rounded-xl bg-amber-50 dark:bg-[#3D2D10] border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between">
               <span>No products registered in Product & Inventory catalog yet.</span>
               <span className="font-bold underline text-[11px]">Add products in Product & Inventory</span>
@@ -993,7 +922,14 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
 
           {/* Product Info & Quantity Row */}
           {currentSelectedProduct && (
-            <div className="p-3 rounded-xl bg-[#E7F2EC]/60 dark:bg-[#1B3D30]/60 border border-[#A3E6C5]/40 grid grid-cols-1 sm:grid-cols-3 gap-3 items-center text-xs">
+            <div className="p-3 rounded-xl bg-[#E7F2EC]/60 dark:bg-[#1B3D30]/60 border border-[#A3E6C5]/40 grid grid-cols-1 sm:grid-cols-4 gap-3 items-center text-xs">
+              <div>
+                <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] block">Category</span>
+                <span className="font-bold text-[#17221D] dark:text-[#E6ECE8]">
+                  {currentSelectedProduct.category}
+                </span>
+              </div>
+
               <div>
                 <span className="text-[10px] text-[#66736C] dark:text-[#8E9E96] block">Selling Price per Unit</span>
                 <span className="font-extrabold text-[#174F3A] dark:text-[#A3E6C5] text-sm">
@@ -1157,10 +1093,11 @@ export const BillingPanel = forwardRef<BillingPanelHandle, BillingPanelProps>(
             <div className="pt-2 border-t border-[#E9EFEB] dark:border-[#1F3128] flex justify-end">
               <button
                 type="submit"
-                className="h-10 px-6 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] dark:hover:bg-[#234F3F] text-white text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2"
+                disabled={isGeneratingBill}
+                className="h-10 px-6 bg-[#174F3A] hover:bg-[#103A2B] dark:bg-[#1B3D30] dark:hover:bg-[#234F3F] text-white text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2 disabled:opacity-60"
               >
                 <Receipt className="w-4 h-4 text-[#A3E6C5]" />
-                <span>Generate Bill & Deduct Stock</span>
+                <span>{isGeneratingBill ? 'Generating...' : 'Generate Bill & Deduct Stock'}</span>
               </button>
             </div>
 

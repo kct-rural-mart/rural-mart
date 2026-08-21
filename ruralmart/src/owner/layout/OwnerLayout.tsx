@@ -151,6 +151,9 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
           )}
 
           {(activeTab === 'Daily Business') && (
+            // TODO: DailyBusinessPageProps doesn't declare `dateRange` — tsc flags this
+            // as an excess prop. Pre-existing, unrelated to Settings/rural_marts work;
+            // logged here rather than fixed (2026-08-21).
             <DailyBusinessPage
               currentMartId={profile?.rural_mart_id}
               theme={theme}
@@ -168,6 +171,8 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
           )}
 
           {(activeTab === 'Farmer Outreach') && (
+            // TODO: same pre-existing dateRange/props mismatch as DailyBusinessPage
+            // above — FarmerOutreachPageProps doesn't declare it either.
             <FarmerOutreachPage
               currentMartId={profile?.rural_mart_id}
               theme={theme}

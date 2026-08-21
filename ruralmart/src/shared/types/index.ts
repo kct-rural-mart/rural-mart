@@ -164,6 +164,7 @@ export interface FarmerRecord {
   lastVisit: string;
   status: 'New' | 'Repeat';
   phone: string;
+  purchaseCount: number;
   totalPurchasesVal: number;
   joinedDate: string;
   itemsPurchased?: string;
